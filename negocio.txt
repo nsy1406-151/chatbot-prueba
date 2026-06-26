@@ -1,0 +1,15 @@
+Nombre del negocio: Pizzería Don Mario
+
+Horario: Lunes a sábado, 12pm a 10pm. Domingos cerrado.
+
+Menú:
+- Pizza margarita: $25.000
+- Pizza pepperoni: $28.000
+- Pizza hawaiana: $30.000
+- Pizza vegetariana: $27.000
+
+Domicilios: Sí, costo adicional de $5.000, tiempo estimado 30-40 minutos.
+
+Ubicación: Av. Principal #123, Cúcuta.
+
+Métodos de pago: Efectivo, tarjeta, transferencia.
