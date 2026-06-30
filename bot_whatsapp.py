@@ -25,6 +25,55 @@ system_message = {
 # Diccionario: cada número de teléfono tiene su propio historial
 conversaciones = {}
 
+VERIFY_TOKEN_META = "solomedias2026"  # el mismo que pondrás en Meta
+
+@app.route("/whatsapp_meta", methods=["GET"])
+def verificar_webhook_meta():
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    
+    if mode == "subscribe" and token == VERIFY_TOKEN_META:
+        return challenge, 200
+    return "Token inválido", 403
+
+@app.route("/whatsapp_meta", methods=["POST"])
+def whatsapp_meta_reply():
+    datos = request.get_json()
+    
+    try:
+        mensaje_evento = datos["entry"][0]["changes"][0]["value"]["messages"][0]
+        numero = mensaje_evento["from"]
+        mensaje_usuario = mensaje_evento["text"]["body"]
+    except (KeyError, IndexError):
+        return "OK", 200
+    
+    es_admin = (numero == "57XXXXXXXXXX")  # tu número de mamá sin el +
+    
+    respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, canal="whatsapp_meta")
+    
+    if respuesta_texto:
+        enviar_mensaje_whatsapp(numero, respuesta_texto)
+    
+    return "OK", 200
+
+
+def enviar_mensaje_whatsapp(numero_destino, texto):
+    import requests
+    url = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": numero_destino,
+        "type": "text",
+        "text": {"body": texto}
+    }
+    requests.post(url, headers=headers, json=payload)
+
+
 @app.route("/", methods=["GET"])
 def home():
     return "Bot activo", 200
