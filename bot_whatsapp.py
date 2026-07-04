@@ -34,7 +34,7 @@ pausados = set()
 NUMERO_ADMIN = os.getenv("NUMERO_ADMIN", "57XXXXXXXXXX")
 
 # Token de verificación para el webhook de Meta
-VERIFY_TOKEN_META = "solomedias2026"
+VERIFY_TOKEN_META = "botdemo2026"
 
 
 # ─────────────────────────────────────────
