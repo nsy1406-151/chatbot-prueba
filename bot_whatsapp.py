@@ -15,7 +15,7 @@ with open("negocio.txt", "r", encoding="utf-8") as archivo:
 
 system_message = {
     "role": "system",
-    "content": f"""Eres el asistente virtual de Solo Medias.
+    "content": f"""Eres el asistente virtual de este negocio.
     Responde SOLO basándote en la siguiente información.
     Si te preguntan algo que no está aquí, dilo amablemente y sugiere contactar directamente al negocio.
 
