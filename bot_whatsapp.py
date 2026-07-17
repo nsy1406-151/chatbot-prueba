@@ -31,10 +31,10 @@ conversaciones = {}
 pausados = set()
 
 # Número admin de tu mamá (sin el +, ej: 573001234567)
-NUMERO_ADMIN = os.getenv("NUMERO_ADMIN", "573152251406")
+NUMERO_ADMIN = os.getenv("NUMERO_ADMIN", "57XXXXXXXXXX")
 
 # Token de verificación para el webhook de Meta
-VERIFY_TOKEN_META = "botdemo2026"
+VERIFY_TOKEN_META = "solomedias2026"
 
 
 # ─────────────────────────────────────────
