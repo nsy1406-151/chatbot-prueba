@@ -7,6 +7,7 @@ from google.oauth2.service_account import Credentials
 import os
 import requests as req
 import logging
+import json
 
 # ─────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
@@ -59,7 +60,9 @@ def obtener_inventario():
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive"
         ]
-        creds = Credentials.from_service_account_file("credenciales.json", scopes=scope)
+        # Lee las credenciales desde variable de entorno en vez del archivo
+        creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
         gc = gspread.authorize(creds)
         hoja = gc.open_by_key(SHEET_ID).sheet1
         datos = hoja.get_all_records()
