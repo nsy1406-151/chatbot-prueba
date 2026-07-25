@@ -32,7 +32,7 @@ VERIFY_TOKEN_META = os.getenv("VERIFY_TOKEN_META", "botdemo2026")
 MAX_MENSAJES = 20
 
 # ID del Google Sheet 
-SHEET_ID = os.getenv("SHEET_ID", "1YROxQfPAsrfb56kvHuhqJPoMpZxASdW34S7fma1jhy8")
+SHEET_ID = os.getenv("SHEET_ID")
 
 # ─────────────────────────────────────────
 # ESTADO DEL BOT
