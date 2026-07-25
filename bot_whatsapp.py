@@ -216,7 +216,9 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
 
     # ── Lógica normal del chatbot ──
     if identificador not in conversaciones:
-        conversaciones[identificador] = [crear_system_message(identificador)]
+    conversaciones[identificador] = [crear_system_message(identificador)]
+else:
+    conversaciones[identificador][0] = crear_system_message(identificador)
 
     conversaciones[identificador].append({"role": "user", "content": mensaje_usuario})
 
