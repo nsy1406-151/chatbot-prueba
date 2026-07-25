@@ -65,6 +65,8 @@ def obtener_inventario():
         hoja = gc.open_by_key(SHEET_ID).sheet1
         datos = hoja.get_all_records()
 
+        logger.info(f"Google Sheets: {len(datos)} filas leídas")
+
         if not datos:
             return ""
 
