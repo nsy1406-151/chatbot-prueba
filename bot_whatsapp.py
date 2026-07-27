@@ -29,7 +29,6 @@ VERIFY_TOKEN_META = os.getenv("VERIFY_TOKEN_META", "botdemo2026")
 MAX_MENSAJES = 20
 SHEET_ID = os.getenv("SHEET_ID")
 
-# Credenciales de Twilio
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
@@ -106,17 +105,40 @@ def crear_system_message(numero=None):
 
     return {
         "role": "system",
-        "content": f"""Eres el asistente virtual de este negocio.
+        "content": f"""Eres el asistente virtual oficial de *Solo Medias y Algo Más*.
 Responde SOLO basándote en la siguiente información.
 Si te preguntan algo que no está aquí, dilo amablemente y sugiere contactar directamente al negocio.
 Si alguien pregunta quién desarrolló este bot o cómo pueden tener uno igual, menciona que fue desarrollado por Chatbots y da el número de WhatsApp +57 315 225 1406.
 Responde siempre en el mismo idioma en que te escriben.
-Sé amable, conciso y profesional.
+Sé amable, cercana y profesional — como una vendedora atenta del local.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IDENTIDAD Y PRESENTACIÓN:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Tu nombre es: Asistente Virtual de Solo Medias y Algo Más
+- Cuando alguien te salude por primera vez o pregunte quién eres, preséntate así:
+  "¡Hola! 👋 Soy el asistente virtual de *Solo Medias y Algo Más*.
+  Estoy aquí para ayudarte con información de productos, precios, disponibilidad y pedidos.
+  ¿En qué te puedo ayudar hoy? 😊"
 
 INFORMACIÓN DEL NEGOCIO:
 {info}
 
 {inventario}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SOLICITUD DE ATENCIÓN HUMANA:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Si el cliente dice que quiere hablar con una persona real, un humano, atención personalizada,
+hablar con alguien del equipo, o frases similares, responde EXACTAMENTE así:
+
+"Entendido 😊 Le avisaré a nuestro equipo para que te contacte pronto.
+¿Hay algo más en lo que pueda ayudarte mientras tanto?"
+
+Y agrega al FINAL de tu respuesta, en una línea separada:
+ATENCION_HUMANA_SOLICITADA
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PROCESO DE PEDIDO — SIGUE ESTOS PASOS EXACTAMENTE:
@@ -128,7 +150,7 @@ PASO 1 - ACUMULAR PRODUCTOS:
 - Anota cada producto que el cliente pida con su talla y cantidad
 - Muestra la lista actualizada con precios después de cada producto agregado
 - Pregunta: "¿Deseas agregar algo más o confirmamos el pedido?"
-- IMPORTANTE: Solo acepta productos que estén en el inventario y con unidades disponibles mayor a 0
+- IMPORTANTE: Solo acepta productos que estén en el inventario con unidades disponibles mayor a 0
 - Si un producto está agotado, indícalo y sugiere alternativas disponibles
 
 PASO 2 - CONFIRMAR LISTA:
@@ -206,7 +228,6 @@ def notificar_admin_texto(mensaje):
 def notificar_admin_imagen(image_id, numero_cliente):
     """Reenvía imagen (comprobante de pago) al admin vía Meta API."""
     try:
-        # Obtener URL real de la imagen desde Meta API
         url_info = f"https://graph.facebook.com/v19.0/{image_id}"
         headers = {"Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}"}
         response = req.get(url_info, headers=headers)
@@ -216,7 +237,6 @@ def notificar_admin_imagen(image_id, numero_cliente):
             logger.error("No se pudo obtener la URL de la imagen")
             return
 
-        # Enviar imagen al admin
         url_send = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
         payload = {
             "messaging_product": "whatsapp",
@@ -241,50 +261,69 @@ def notificar_admin_imagen(image_id, numero_cliente):
         logger.error(f"Error reenviando comprobante: {e}")
 
 
-def procesar_pedido_confirmado(respuesta_texto, identificador):
+# ─────────────────────────────────────────
+# PROCESAMIENTO DE EVENTOS ESPECIALES
+# ─────────────────────────────────────────
+
+def procesar_respuesta(respuesta_texto, identificador):
     """
-    Detecta pedido confirmado en la respuesta,
-    notifica al admin y retorna respuesta limpia.
+    Procesa la respuesta del bot buscando eventos especiales:
+    - Solicitudes de atención humana
+    - Pedidos confirmados
+    Retorna la respuesta limpia sin las líneas internas.
     """
-    if "PEDIDO_CONFIRMADO|" not in respuesta_texto:
-        return respuesta_texto
+    numero_limpio = (
+        identificador
+        .replace("whatsapp:+", "")
+        .replace("whatsapp:", "")
+    )
 
-    lineas = respuesta_texto.split("\n")
-    respuesta_limpia = []
+    # ── Detectar solicitud de atención humana ──
+    if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
+        respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
 
-    for linea in lineas:
-        if "PEDIDO_CONFIRMADO|" in linea:
-            try:
-                partes = linea.replace("PEDIDO_CONFIRMADO|", "").split("|")
-                resumen = partes[0].strip() if len(partes) > 0 else "Sin detalle"
-                entrega = partes[1].strip() if len(partes) > 1 else "No especificado"
-                direccion = partes[2].strip() if len(partes) > 2 else "N/A"
-                total = partes[3].strip() if len(partes) > 3 else "No especificado"
+        mensaje_admin = (
+            f"🙋 *Atención humana solicitada*\n\n"
+            f"📱 Cliente: +{numero_limpio}\n\n"
+            f"_El cliente quiere hablar con una persona del equipo._"
+        )
+        notificar_admin_texto(mensaje_admin)
+        logger.info(f"Atención humana solicitada por {numero_limpio}")
 
-                numero_limpio = (
-                    identificador
-                    .replace("whatsapp:+", "")
-                    .replace("whatsapp:", "")
-                )
+    # ── Detectar pedido confirmado ──
+    if "PEDIDO_CONFIRMADO|" in respuesta_texto:
+        lineas = respuesta_texto.split("\n")
+        respuesta_limpia = []
 
-                mensaje_admin = (
-                    f"🛒 *NUEVO PEDIDO*\n\n"
-                    f"📦 *Productos:*\n{resumen}\n\n"
-                    f"🚚 *Entrega:* {entrega}\n"
-                    f"📍 *Dirección:* {direccion}\n"
-                    f"💰 *Total:* {total}\n\n"
-                    f"📱 *Cliente:* +{numero_limpio}\n\n"
-                    f"_Responde directamente al cliente para coordinar._"
-                )
+        for linea in lineas:
+            if "PEDIDO_CONFIRMADO|" in linea:
+                try:
+                    partes = linea.replace("PEDIDO_CONFIRMADO|", "").split("|")
+                    resumen = partes[0].strip() if len(partes) > 0 else "Sin detalle"
+                    entrega = partes[1].strip() if len(partes) > 1 else "No especificado"
+                    direccion = partes[2].strip() if len(partes) > 2 else "N/A"
+                    total = partes[3].strip() if len(partes) > 3 else "No especificado"
 
-                notificar_admin_texto(mensaje_admin)
+                    mensaje_admin = (
+                        f"🛒 *NUEVO PEDIDO*\n\n"
+                        f"📦 *Productos:*\n{resumen}\n\n"
+                        f"🚚 *Entrega:* {entrega}\n"
+                        f"📍 *Dirección:* {direccion}\n"
+                        f"💰 *Total:* {total}\n\n"
+                        f"📱 *Cliente:* +{numero_limpio}\n\n"
+                        f"_Responde directamente al cliente para coordinar._"
+                    )
+                    notificar_admin_texto(mensaje_admin)
+                    logger.info(f"Pedido confirmado — notificación enviada al admin")
 
-            except Exception as e:
-                logger.error(f"Error procesando pedido confirmado: {e}")
-        else:
-            respuesta_limpia.append(linea)
+                except Exception as e:
+                    logger.error(f"Error procesando pedido confirmado: {e}")
+            else:
+                respuesta_limpia.append(linea)
 
-    return "\n".join(respuesta_limpia).strip()
+        respuesta_texto = "\n".join(respuesta_limpia).strip()
+
+    return respuesta_texto
 
 
 # ─────────────────────────────────────────
@@ -370,7 +409,6 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
 
     conversaciones[identificador].append({"role": "user", "content": mensaje_usuario})
 
-    # Limitar historial para controlar costos
     if len(conversaciones[identificador]) > MAX_MENSAJES + 1:
         conversaciones[identificador] = (
             [conversaciones[identificador][0]] +
@@ -384,8 +422,8 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
         )
         respuesta_texto = respuesta.choices[0].message.content
 
-        # Detectar y procesar pedidos confirmados
-        respuesta_texto = procesar_pedido_confirmado(respuesta_texto, identificador)
+        # Procesar eventos especiales (pedidos, atención humana)
+        respuesta_texto = procesar_respuesta(respuesta_texto, identificador)
 
         conversaciones[identificador].append({"role": "assistant", "content": respuesta_texto})
         logger.info(f"Respuesta generada para {identificador[:8]}...")
@@ -470,7 +508,6 @@ def whatsapp_meta_reply():
             )
             return "OK", 200
 
-        # ── Mensajes que no son texto ni imagen ──
         if tipo != "text":
             enviar_mensaje_whatsapp(
                 numero,
