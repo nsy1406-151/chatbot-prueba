@@ -29,7 +29,7 @@ VERIFY_TOKEN_META = os.getenv("VERIFY_TOKEN_META", "botdemo2026")
 MAX_MENSAJES = 20
 SHEET_ID = os.getenv("SHEET_ID")
 
-# Credenciales de Twilio (para notificar al admin en modo sandbox)
+# Credenciales de Twilio
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
@@ -128,17 +128,12 @@ PASO 1 - ACUMULAR PRODUCTOS:
 - Anota cada producto que el cliente pida con su talla y cantidad
 - Muestra la lista actualizada con precios después de cada producto agregado
 - Pregunta: "¿Deseas agregar algo más o confirmamos el pedido?"
-- IMPORTANTE: Solo acepta productos que estén en el inventario y con unidades disponibles (mayor a 0)
+- IMPORTANTE: Solo acepta productos que estén en el inventario y con unidades disponibles mayor a 0
 - Si un producto está agotado, indícalo y sugiere alternativas disponibles
 
 PASO 2 - CONFIRMAR LISTA:
 - Cuando el cliente diga "confirmar", "listo", "eso es todo" o similar
 - Muestra el resumen completo con subtotal
-- Ejemplo:
-  "📝 Tu pedido:
-  • 2x Boxer talla M — $50.000
-  • 1x Pijama talla S — $30.000
-  Subtotal: $80.000"
 
 PASO 3 - TIPO DE ENTREGA:
 - Pregunta exactamente esto:
@@ -147,8 +142,7 @@ PASO 3 - TIPO DE ENTREGA:
   🛵 *Domicilio* — $5.000 adicional"
 
 PASO 4 - DIRECCIÓN (solo si eligió domicilio):
-- Pide la dirección completa de entrega
-- Confirma que es dentro de Cúcuta
+- Pide la dirección completa de entrega dentro de Cúcuta
 
 PASO 5 - DATOS DE PAGO:
 - Muestra el total final y los datos de pago:
@@ -169,7 +163,7 @@ PASO 5 - DATOS DE PAGO:
   Por favor envía tu comprobante de pago por este mismo chat 📸
   ¡Gracias por tu compra en Solo Medias y Algo Más! 🛍️"
 
-- Al FINAL de ese mensaje, en una línea separada, agrega EXACTAMENTE esto (el sistema lo usa internamente y no lo ve el cliente):
+- Al FINAL de ese mensaje, en una línea separada, agrega EXACTAMENTE esto:
 PEDIDO_CONFIRMADO|[lista productos y cantidades]|[Domicilio o Recoger en local]|[dirección o N/A]|$[total con domicilio si aplica]
 
 REGLAS IMPORTANTES:
@@ -177,45 +171,80 @@ REGLAS IMPORTANTES:
 - Si el cliente cambia de opinión, actualiza el pedido sin problema
 - Si hay algún producto que no está en el inventario, no lo agregues al pedido
 - El domicilio solo aplica dentro de Cúcuta
-- Sé paciente si el cliente tiene dudas durante el proceso
+- Cuando el cliente diga que ya envió el comprobante, responde amablemente que lo revisarán pronto
 """
     }
 
 
 # ─────────────────────────────────────────
-# NOTIFICACIÓN AL ADMIN
+# NOTIFICACIONES AL ADMIN
 # ─────────────────────────────────────────
 
-def notificar_admin(mensaje, canal="ambos"):
-    """Envía notificación al admin por WhatsApp (Meta y/o Twilio)."""
+def notificar_admin_texto(mensaje):
+    """Envía mensaje de texto al admin por Meta API y Twilio."""
 
-    # Intentar por Meta API
-    if canal in ("meta", "ambos"):
-        try:
-            enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje)
-            logger.info("Notificación enviada al admin por Meta API")
-        except Exception as e:
-            logger.error(f"Error notificando admin por Meta: {e}")
+    # Meta API
+    try:
+        enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje)
+        logger.info("Notificación texto enviada al admin por Meta API")
+    except Exception as e:
+        logger.error(f"Error notificando admin por Meta: {e}")
 
-    # Intentar por Twilio
-    if canal in ("twilio", "ambos"):
-        try:
-            twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-            twilio_client.messages.create(
-                from_=TWILIO_WHATSAPP_NUMBER,
-                to=f"whatsapp:+{NUMERO_ADMIN}",
-                body=mensaje
-            )
-            logger.info("Notificación enviada al admin por Twilio")
-        except Exception as e:
-            logger.error(f"Error notificando admin por Twilio: {e}")
+    # Twilio
+    try:
+        twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        twilio_client.messages.create(
+            from_=TWILIO_WHATSAPP_NUMBER,
+            to=f"whatsapp:+{NUMERO_ADMIN}",
+            body=mensaje
+        )
+        logger.info("Notificación texto enviada al admin por Twilio")
+    except Exception as e:
+        logger.error(f"Error notificando admin por Twilio: {e}")
+
+
+def notificar_admin_imagen(image_id, numero_cliente):
+    """Reenvía imagen (comprobante de pago) al admin vía Meta API."""
+    try:
+        # Obtener URL real de la imagen desde Meta API
+        url_info = f"https://graph.facebook.com/v19.0/{image_id}"
+        headers = {"Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}"}
+        response = req.get(url_info, headers=headers)
+        image_url = response.json().get("url")
+
+        if not image_url:
+            logger.error("No se pudo obtener la URL de la imagen")
+            return
+
+        # Enviar imagen al admin
+        url_send = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": NUMERO_ADMIN,
+            "type": "image",
+            "image": {
+                "link": image_url,
+                "caption": f"📸 *Comprobante de pago recibido*\n👤 Cliente: +{numero_cliente}"
+            }
+        }
+        req.post(
+            url_send,
+            headers={
+                "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
+        logger.info(f"Comprobante reenviado al admin desde cliente {numero_cliente}")
+
+    except Exception as e:
+        logger.error(f"Error reenviando comprobante: {e}")
 
 
 def procesar_pedido_confirmado(respuesta_texto, identificador):
     """
-    Detecta si hay un pedido confirmado en la respuesta,
-    extrae el resumen y notifica al admin.
-    Retorna la respuesta limpia (sin la línea interna).
+    Detecta pedido confirmado en la respuesta,
+    notifica al admin y retorna respuesta limpia.
     """
     if "PEDIDO_CONFIRMADO|" not in respuesta_texto:
         return respuesta_texto
@@ -232,18 +261,23 @@ def procesar_pedido_confirmado(respuesta_texto, identificador):
                 direccion = partes[2].strip() if len(partes) > 2 else "N/A"
                 total = partes[3].strip() if len(partes) > 3 else "No especificado"
 
+                numero_limpio = (
+                    identificador
+                    .replace("whatsapp:+", "")
+                    .replace("whatsapp:", "")
+                )
+
                 mensaje_admin = (
                     f"🛒 *NUEVO PEDIDO*\n\n"
                     f"📦 *Productos:*\n{resumen}\n\n"
                     f"🚚 *Entrega:* {entrega}\n"
                     f"📍 *Dirección:* {direccion}\n"
                     f"💰 *Total:* {total}\n\n"
-                    f"📱 *Cliente:* +{identificador.replace('whatsapp:+', '').replace('whatsapp:', '')}\n\n"
+                    f"📱 *Cliente:* +{numero_limpio}\n\n"
                     f"_Responde directamente al cliente para coordinar._"
                 )
 
-                notificar_admin(mensaje_admin, canal="ambos")
-                logger.info(f"Pedido confirmado — notificación enviada al admin")
+                notificar_admin_texto(mensaje_admin)
 
             except Exception as e:
                 logger.error(f"Error procesando pedido confirmado: {e}")
@@ -416,11 +450,32 @@ def whatsapp_meta_reply():
     datos = request.get_json()
 
     try:
-        mensaje_evento = datos["entry"][0]["changes"][0]["value"]["messages"][0]
-        numero = mensaje_evento["from"]
+        entrada = datos["entry"][0]["changes"][0]["value"]
+        mensajes = entrada.get("messages", [])
 
-        if mensaje_evento.get("type") != "text":
-            enviar_mensaje_whatsapp(numero, "Por el momento solo puedo responder mensajes de texto. 😊")
+        if not mensajes:
+            return "OK", 200
+
+        mensaje_evento = mensajes[0]
+        numero = mensaje_evento["from"]
+        tipo = mensaje_evento.get("type", "text")
+
+        # ── Manejo de imágenes (comprobantes de pago) ──
+        if tipo == "image":
+            image_id = mensaje_evento["image"]["id"]
+            notificar_admin_imagen(image_id, numero)
+            enviar_mensaje_whatsapp(
+                numero,
+                "✅ ¡Recibimos tu comprobante de pago! Lo verificaremos y coordinaremos tu pedido pronto. ¡Gracias! 🙏"
+            )
+            return "OK", 200
+
+        # ── Mensajes que no son texto ni imagen ──
+        if tipo != "text":
+            enviar_mensaje_whatsapp(
+                numero,
+                "Por el momento solo puedo responder mensajes de texto e imágenes. 😊"
+            )
             return "OK", 200
 
         mensaje_usuario = mensaje_evento["text"]["body"]
