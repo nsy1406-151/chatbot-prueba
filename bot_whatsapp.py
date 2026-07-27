@@ -1,5 +1,6 @@
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
+from twilio.rest import Client as TwilioClient
 from openai import OpenAI
 from dotenv import load_dotenv
 import gspread
@@ -8,6 +9,7 @@ import os
 import requests as req
 import logging
 import json
+
 # ─────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
 # ─────────────────────────────────────────
@@ -22,29 +24,22 @@ app = Flask(__name__)
 # VARIABLES DE CONFIGURACIÓN
 # ─────────────────────────────────────────
 
-# Número del administrador
 NUMERO_ADMIN = os.getenv("NUMERO_ADMIN", "573152251406")
-
-# Token de verificación para el webhook de Meta
 VERIFY_TOKEN_META = os.getenv("VERIFY_TOKEN_META", "botdemo2026")
-
-# Máximo de mensajes por conversación (para controlar costos)
 MAX_MENSAJES = 20
-
-# ID del Google Sheet 
 SHEET_ID = os.getenv("SHEET_ID")
+
+# Credenciales de Twilio (para notificar al admin en modo sandbox)
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
 
 # ─────────────────────────────────────────
 # ESTADO DEL BOT
 # ─────────────────────────────────────────
 
-# Historial de conversaciones por usuario
 conversaciones = {}
-
-# Números pausados (el bot no responde a estos)
 pausados = set()
-
-# Estado global del bot (True = activo, False = pausado para todos)
 bot_activo = True
 
 
@@ -92,13 +87,8 @@ def obtener_inventario():
 # ─────────────────────────────────────────
 
 def cargar_info_negocio(numero=None):
-    """
-    Carga el negocio.txt correcto según el número de teléfono.
-    Cuando tengas múltiples clientes, agrega sus números aquí.
-    """
     negocios = {
         # "573001234567": "negocios/cliente1.txt",
-        # "573009876543": "negocios/cliente2.txt",
     }
     archivo = negocios.get(numero, "negocio.txt")
     try:
@@ -110,7 +100,7 @@ def cargar_info_negocio(numero=None):
 
 
 def crear_system_message(numero=None):
-    """Crea el system message con la info del negocio e inventario actualizado."""
+    """Crea el system message con info del negocio, inventario y flujo de compra."""
     info = cargar_info_negocio(numero)
     inventario = obtener_inventario()
 
@@ -127,8 +117,140 @@ INFORMACIÓN DEL NEGOCIO:
 {info}
 
 {inventario}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PROCESO DE PEDIDO — SIGUE ESTOS PASOS EXACTAMENTE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Cuando un cliente quiera comprar, sigue este proceso en orden:
+
+PASO 1 - ACUMULAR PRODUCTOS:
+- Anota cada producto que el cliente pida con su talla y cantidad
+- Muestra la lista actualizada con precios después de cada producto agregado
+- Pregunta: "¿Deseas agregar algo más o confirmamos el pedido?"
+- IMPORTANTE: Solo acepta productos que estén en el inventario y con unidades disponibles (mayor a 0)
+- Si un producto está agotado, indícalo y sugiere alternativas disponibles
+
+PASO 2 - CONFIRMAR LISTA:
+- Cuando el cliente diga "confirmar", "listo", "eso es todo" o similar
+- Muestra el resumen completo con subtotal
+- Ejemplo:
+  "📝 Tu pedido:
+  • 2x Boxer talla M — $50.000
+  • 1x Pijama talla S — $30.000
+  Subtotal: $80.000"
+
+PASO 3 - TIPO DE ENTREGA:
+- Pregunta exactamente esto:
+  "¿Cómo prefieres recibirlo?
+  🏪 *Recoger en el local* — Av. 4 # 11-15, Edificio Benur Local 4, Centro (gratis)
+  🛵 *Domicilio* — $5.000 adicional"
+
+PASO 4 - DIRECCIÓN (solo si eligió domicilio):
+- Pide la dirección completa de entrega
+- Confirma que es dentro de Cúcuta
+
+PASO 5 - DATOS DE PAGO:
+- Muestra el total final y los datos de pago:
+
+  "✅ *Pedido confirmado*
+
+  📦 Resumen:
+  [lista de productos con precios]
+  [costo domicilio si aplica]
+  ━━━━━━━━━━━━━━
+  💰 *Total: $[total]*
+
+  💳 *Datos de pago:*
+  🏦 Bancolombia ahorros: 497-000195-85
+  👤 Titular: Luis Felipe Parra Granados
+  📱 Bre-B / Llave: 0073865313
+
+  Por favor envía tu comprobante de pago por este mismo chat 📸
+  ¡Gracias por tu compra en Solo Medias y Algo Más! 🛍️"
+
+- Al FINAL de ese mensaje, en una línea separada, agrega EXACTAMENTE esto (el sistema lo usa internamente y no lo ve el cliente):
+PEDIDO_CONFIRMADO|[lista productos y cantidades]|[Domicilio o Recoger en local]|[dirección o N/A]|$[total con domicilio si aplica]
+
+REGLAS IMPORTANTES:
+- Nunca confirmes un pedido sin antes mostrar el total y los datos de pago
+- Si el cliente cambia de opinión, actualiza el pedido sin problema
+- Si hay algún producto que no está en el inventario, no lo agregues al pedido
+- El domicilio solo aplica dentro de Cúcuta
+- Sé paciente si el cliente tiene dudas durante el proceso
 """
     }
+
+
+# ─────────────────────────────────────────
+# NOTIFICACIÓN AL ADMIN
+# ─────────────────────────────────────────
+
+def notificar_admin(mensaje, canal="ambos"):
+    """Envía notificación al admin por WhatsApp (Meta y/o Twilio)."""
+
+    # Intentar por Meta API
+    if canal in ("meta", "ambos"):
+        try:
+            enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje)
+            logger.info("Notificación enviada al admin por Meta API")
+        except Exception as e:
+            logger.error(f"Error notificando admin por Meta: {e}")
+
+    # Intentar por Twilio
+    if canal in ("twilio", "ambos"):
+        try:
+            twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            twilio_client.messages.create(
+                from_=TWILIO_WHATSAPP_NUMBER,
+                to=f"whatsapp:+{NUMERO_ADMIN}",
+                body=mensaje
+            )
+            logger.info("Notificación enviada al admin por Twilio")
+        except Exception as e:
+            logger.error(f"Error notificando admin por Twilio: {e}")
+
+
+def procesar_pedido_confirmado(respuesta_texto, identificador):
+    """
+    Detecta si hay un pedido confirmado en la respuesta,
+    extrae el resumen y notifica al admin.
+    Retorna la respuesta limpia (sin la línea interna).
+    """
+    if "PEDIDO_CONFIRMADO|" not in respuesta_texto:
+        return respuesta_texto
+
+    lineas = respuesta_texto.split("\n")
+    respuesta_limpia = []
+
+    for linea in lineas:
+        if "PEDIDO_CONFIRMADO|" in linea:
+            try:
+                partes = linea.replace("PEDIDO_CONFIRMADO|", "").split("|")
+                resumen = partes[0].strip() if len(partes) > 0 else "Sin detalle"
+                entrega = partes[1].strip() if len(partes) > 1 else "No especificado"
+                direccion = partes[2].strip() if len(partes) > 2 else "N/A"
+                total = partes[3].strip() if len(partes) > 3 else "No especificado"
+
+                mensaje_admin = (
+                    f"🛒 *NUEVO PEDIDO*\n\n"
+                    f"📦 *Productos:*\n{resumen}\n\n"
+                    f"🚚 *Entrega:* {entrega}\n"
+                    f"📍 *Dirección:* {direccion}\n"
+                    f"💰 *Total:* {total}\n\n"
+                    f"📱 *Cliente:* +{identificador.replace('whatsapp:+', '').replace('whatsapp:', '')}\n\n"
+                    f"_Responde directamente al cliente para coordinar._"
+                )
+
+                notificar_admin(mensaje_admin, canal="ambos")
+                logger.info(f"Pedido confirmado — notificación enviada al admin")
+
+            except Exception as e:
+                logger.error(f"Error procesando pedido confirmado: {e}")
+        else:
+            respuesta_limpia.append(linea)
+
+    return "\n".join(respuesta_limpia).strip()
 
 
 # ─────────────────────────────────────────
@@ -136,10 +258,6 @@ INFORMACIÓN DEL NEGOCIO:
 # ─────────────────────────────────────────
 
 def procesar_mensaje(identificador, mensaje_usuario, es_admin):
-    """
-    Lógica central compartida entre WhatsApp (Twilio) y WhatsApp (Meta).
-    Retorna el texto de respuesta, o None si el bot no debe responder.
-    """
     global bot_activo
 
     # ── Comandos del administrador ──
@@ -149,13 +267,11 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
         if cmd.startswith("pausar "):
             id_pausar = mensaje_usuario[7:].strip()
             pausados.add(id_pausar)
-            logger.info(f"Bot pausado para: {id_pausar}")
             return f"✅ Bot pausado para {id_pausar}"
 
         elif cmd.startswith("activar "):
             id_activar = mensaje_usuario[8:].strip()
             pausados.discard(id_activar)
-            logger.info(f"Bot reactivado para: {id_activar}")
             return f"✅ Bot reactivado para {id_activar}"
 
         elif cmd == "lista":
@@ -165,12 +281,10 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
 
         elif cmd == "pausar todo":
             bot_activo = False
-            logger.info("Bot pausado globalmente")
             return "⏸️ Bot pausado para todos los usuarios."
 
         elif cmd == "activar todo":
             bot_activo = True
-            logger.info("Bot reactivado globalmente")
             return "▶️ Bot reactivado para todos los usuarios."
 
         elif cmd == "estado":
@@ -235,6 +349,10 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
             messages=conversaciones[identificador]
         )
         respuesta_texto = respuesta.choices[0].message.content
+
+        # Detectar y procesar pedidos confirmados
+        respuesta_texto = procesar_pedido_confirmado(respuesta_texto, identificador)
+
         conversaciones[identificador].append({"role": "assistant", "content": respuesta_texto})
         logger.info(f"Respuesta generada para {identificador[:8]}...")
         return respuesta_texto
@@ -283,7 +401,6 @@ def whatsapp_reply():
 
 @app.route("/whatsapp_meta", methods=["GET"])
 def verificar_webhook_meta():
-    """Meta llama a esta ruta para verificar el webhook al configurarlo."""
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -296,7 +413,6 @@ def verificar_webhook_meta():
 
 @app.route("/whatsapp_meta", methods=["POST"])
 def whatsapp_meta_reply():
-    """Recibe mensajes reales de WhatsApp vía Meta API."""
     datos = request.get_json()
 
     try:
