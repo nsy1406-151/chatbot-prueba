@@ -491,7 +491,8 @@ def privacy():
 @app.route("/whatsapp_meta", methods=["POST"])
 def whatsapp_meta_reply():
     datos = request.get_json()
-
+    logger.info(f"PAYLOAD COMPLETO: {json.dumps(datos)}")
+    
     try:
         entrada = datos["entry"][0]["changes"][0]["value"]
         mensajes = entrada.get("messages", [])
