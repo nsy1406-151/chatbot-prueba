@@ -501,7 +501,7 @@ def whatsapp_meta_reply():
             return "OK", 200
 
         mensaje_evento = mensajes[0]
-        numero = mensaje_evento["from"]
+        numero = mensaje_evento.get("from") or mensaje_evento.get("from_user_id")
         tipo = mensaje_evento.get("type", "text")
 
         # ── Manejo de imágenes (comprobantes de pago) ──
@@ -523,7 +523,8 @@ def whatsapp_meta_reply():
 
         mensaje_usuario = mensaje_evento["text"]["body"]
 
-    except (KeyError, IndexError):
+    except (KeyError, IndexError) as e: 
+        logger.error(f"Error extrayendo mensaje: {e}") 
         return "OK", 200
 
     logger.info(f"Meta - mensaje de {numero}: {mensaje_usuario[:50]}")
