@@ -1,6 +1,10 @@
 from flask import Flask, request, send_from_directory
-from twilio.twiml.messaging_response import MessagingResponse
-from twilio.rest import Client as TwilioClient
+
+# ── Twilio: dejado comentado, se reactivará cuando se implemente
+#    el modelo Tech Provider / ISV para nuevos clientes ──
+# from twilio.twiml.messaging_response import MessagingResponse
+# from twilio.rest import Client as TwilioClient
+
 from openai import OpenAI
 from dotenv import load_dotenv
 import gspread
@@ -17,35 +21,33 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 app = Flask(__name__)
 
 # ─────────────────────────────────────────
 # VARIABLES DE CONFIGURACIÓN
 # ─────────────────────────────────────────
-
 NUMERO_ADMIN = os.getenv("NUMERO_ADMIN", "573152251406")
 VERIFY_TOKEN_META = os.getenv("VERIFY_TOKEN_META", "botdemo2026")
 MAX_MENSAJES = 20
 SHEET_ID = os.getenv("SHEET_ID")
 
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
+# ── Variables de Twilio: comentadas junto con el resto del código Twilio ──
+# TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+# TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+# TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
 
 # ─────────────────────────────────────────
 # ESTADO DEL BOT
 # ─────────────────────────────────────────
-
 conversaciones = {}
 pausados = set()
 bot_activo = True
 
-
 # ─────────────────────────────────────────
 # GOOGLE SHEETS: LEER INVENTARIO
 # ─────────────────────────────────────────
-
 def obtener_inventario():
     """Lee el inventario desde Google Sheets en tiempo real."""
     try:
@@ -58,7 +60,6 @@ def obtener_inventario():
         gc = gspread.authorize(creds)
         hoja = gc.open_by_key(SHEET_ID).sheet1
         datos = hoja.get_all_records()
-
         logger.info(f"Google Sheets: {len(datos)} filas leídas")
 
         if not datos:
@@ -71,20 +72,16 @@ def obtener_inventario():
                 estado = f"✅ {disponible} unidades" if disponible > 0 else "❌ Agotado"
             else:
                 estado = "✅ Disponible" if str(disponible).lower() == "sí" else "❌ Agotado"
-
             inventario_texto += f"- {item['Producto']} talla {item['Talla']}: {item['Precio']} — {estado}\n"
 
         return inventario_texto
-
     except Exception as e:
         logger.error(f"Error leyendo Google Sheets: {e}")
         return ""
 
-
 # ─────────────────────────────────────────
 # CARGA DE INFORMACIÓN DEL NEGOCIO
 # ─────────────────────────────────────────
-
 def cargar_info_negocio(numero=None):
     negocios = {
         # "573001234567": "negocios/cliente1.txt",
@@ -97,15 +94,20 @@ def cargar_info_negocio(numero=None):
         with open("negocio.txt", "r", encoding="utf-8") as f:
             return f.read()
 
-
 def crear_system_message(numero=None):
-    """Crea el system message con info del negocio, inventario y flujo de compra."""
+    """Crea el system message con info del negocio, inventario y flujo de compra.
+
+    Toda la identidad del negocio (nombre, saludo, dirección, datos de pago)
+    debe venir de negocio.txt — así el mismo código sirve para cualquier
+    cliente sin tener que tocar este prompt.
+    """
     info = cargar_info_negocio(numero)
     inventario = obtener_inventario()
 
     return {
         "role": "system",
-        "content": f"""Eres el asistente virtual oficial de *Solo Medias y Algo Más*.
+        "content": f"""Eres el asistente virtual oficial del negocio descrito a continuación.
+
 Responde SOLO basándote en la siguiente información.
 Si te preguntan algo que no está aquí, dilo amablemente y sugiere contactar directamente al negocio.
 Si alguien pregunta quién desarrolló este bot o cómo pueden tener uno igual, menciona que fue desarrollado por Chatbots y da el número de WhatsApp +57 315 225 1406.
@@ -115,12 +117,8 @@ Sé amable, cercana y profesional — como una vendedora atenta del local.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 IDENTIDAD Y PRESENTACIÓN:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-- Tu nombre es: Asistente Virtual de Solo Medias y Algo Más
-- Cuando alguien te salude por primera vez o pregunte quién eres, preséntate así:
-  "¡Hola! 👋 Soy el asistente virtual de *Solo Medias y Algo Más*.
-  Estoy aquí para ayudarte con información de productos, precios, disponibilidad y pedidos.
-  ¿En qué te puedo ayudar hoy? 😊"
+- Usa el nombre del negocio tal como aparece en la información a continuación.
+- Cuando alguien te salude por primera vez o pregunte quién eres, preséntate mencionando el nombre del negocio y ofrece ayuda con productos, precios, disponibilidad y pedidos.
 
 INFORMACIÓN DEL NEGOCIO:
 {info}
@@ -130,7 +128,6 @@ INFORMACIÓN DEL NEGOCIO:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SOLICITUD DE ATENCIÓN HUMANA:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 Si el cliente dice que quiere hablar con una persona real, un humano, atención personalizada,
 hablar con alguien del equipo, o frases similares, responde EXACTAMENTE así:
 
@@ -143,7 +140,6 @@ ATENCION_HUMANA_SOLICITADA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PROCESO DE PEDIDO — SIGUE ESTOS PASOS EXACTAMENTE:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 Cuando un cliente quiera comprar, sigue este proceso en orden:
 
 PASO 1 - ACUMULAR PRODUCTOS:
@@ -158,32 +154,14 @@ PASO 2 - CONFIRMAR LISTA:
 - Muestra el resumen completo con subtotal
 
 PASO 3 - TIPO DE ENTREGA:
-- Pregunta exactamente esto:
-  "¿Cómo prefieres recibirlo?
-  🏪 *Recoger en el local* — Av. 4 # 11-15, Edificio Benur Local 4, Centro (gratis)
-  🛵 *Domicilio* — $5.000 adicional"
+- Pregunta cómo prefiere recibirlo, usando las opciones de entrega descritas en la información del negocio (recoger en el local o domicilio, con sus respectivos costos y dirección).
 
 PASO 4 - DIRECCIÓN (solo si eligió domicilio):
-- Pide la dirección completa de entrega dentro de Cúcuta
+- Pide la dirección completa de entrega, dentro de la zona de cobertura descrita en la información del negocio.
 
 PASO 5 - DATOS DE PAGO:
-- Muestra el total final y los datos de pago:
-
-  "✅ *Pedido confirmado*
-
-  📦 Resumen:
-  [lista de productos con precios]
-  [costo domicilio si aplica]
-  ━━━━━━━━━━━━━━
-  💰 *Total: $[total]*
-
-  💳 *Datos de pago:*
-  🏦 Bancolombia ahorros: 497-000195-85
-  👤 Titular: Luis Felipe Parra Granados
-  📱 Bre-B / Llave: 0073865313
-
-  Por favor envía tu comprobante de pago por este mismo chat 📸
-  ¡Gracias por tu compra en Solo Medias y Algo Más! 🛍️"
+- Muestra el total final y los datos de pago tal como aparecen en la información del negocio.
+- Pide que envíen el comprobante de pago por el mismo chat.
 
 - Al FINAL de ese mensaje, en una línea separada, agrega EXACTAMENTE esto:
 PEDIDO_CONFIRMADO|[lista productos y cantidades]|[Domicilio o Recoger en local]|[dirección o N/A]|$[total con domicilio si aplica]
@@ -192,38 +170,34 @@ REGLAS IMPORTANTES:
 - Nunca confirmes un pedido sin antes mostrar el total y los datos de pago
 - Si el cliente cambia de opinión, actualiza el pedido sin problema
 - Si hay algún producto que no está en el inventario, no lo agregues al pedido
-- El domicilio solo aplica dentro de Cúcuta
+- El domicilio solo aplica dentro de la zona de cobertura del negocio
 - Cuando el cliente diga que ya envió el comprobante, responde amablemente que lo revisarán pronto
 """
     }
 
-
 # ─────────────────────────────────────────
 # NOTIFICACIONES AL ADMIN
 # ─────────────────────────────────────────
-
 def notificar_admin_texto(mensaje):
-    """Envía mensaje de texto al admin por Meta API y Twilio."""
-
-    # Meta API
+    """Envía mensaje de texto al admin por Meta API."""
     try:
         enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje)
         logger.info("Notificación texto enviada al admin por Meta API")
     except Exception as e:
         logger.error(f"Error notificando admin por Meta: {e}")
 
-    # Twilio
-    try:
-        twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        twilio_client.messages.create(
-            from_=TWILIO_WHATSAPP_NUMBER,
-            to=f"whatsapp:+{NUMERO_ADMIN}",
-            body=mensaje
-        )
-        logger.info("Notificación texto enviada al admin por Twilio")
-    except Exception as e:
-        logger.error(f"Error notificando admin por Twilio: {e}")
-
+    # ── Respaldo por Twilio: comentado, se reactivará junto con el resto
+    #    del código Twilio cuando se implemente el modelo Tech Provider/ISV ──
+    # try:
+    #     twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    #     twilio_client.messages.create(
+    #         from_=TWILIO_WHATSAPP_NUMBER,
+    #         to=f"whatsapp:+{NUMERO_ADMIN}",
+    #         body=mensaje
+    #     )
+    #     logger.info("Notificación texto enviada al admin por Twilio")
+    # except Exception as e:
+    #     logger.error(f"Error notificando admin por Twilio: {e}")
 
 def notificar_admin_imagen(image_id, numero_cliente):
     """Reenvía imagen (comprobante de pago) al admin vía Meta API."""
@@ -256,15 +230,12 @@ def notificar_admin_imagen(image_id, numero_cliente):
             json=payload
         )
         logger.info(f"Comprobante reenviado al admin desde cliente {numero_cliente}")
-
     except Exception as e:
         logger.error(f"Error reenviando comprobante: {e}")
-
 
 # ─────────────────────────────────────────
 # PROCESAMIENTO DE EVENTOS ESPECIALES
 # ─────────────────────────────────────────
-
 def procesar_respuesta(respuesta_texto, identificador):
     """
     Procesa la respuesta del bot buscando eventos especiales:
@@ -281,7 +252,6 @@ def procesar_respuesta(respuesta_texto, identificador):
     # ── Detectar solicitud de atención humana ──
     if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
         respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
-
         mensaje_admin = (
             f"🙋 *Atención humana solicitada*\n\n"
             f"📱 Cliente: +{numero_limpio}\n\n"
@@ -294,7 +264,6 @@ def procesar_respuesta(respuesta_texto, identificador):
     if "PEDIDO_CONFIRMADO|" in respuesta_texto:
         lineas = respuesta_texto.split("\n")
         respuesta_limpia = []
-
         for linea in lineas:
             if "PEDIDO_CONFIRMADO|" in linea:
                 try:
@@ -315,51 +284,41 @@ def procesar_respuesta(respuesta_texto, identificador):
                     )
                     notificar_admin_texto(mensaje_admin)
                     logger.info(f"Pedido confirmado — notificación enviada al admin")
-
                 except Exception as e:
                     logger.error(f"Error procesando pedido confirmado: {e}")
             else:
                 respuesta_limpia.append(linea)
-
         respuesta_texto = "\n".join(respuesta_limpia).strip()
 
     return respuesta_texto
 
-
 # ─────────────────────────────────────────
 # FUNCIÓN CENTRAL: procesa cualquier mensaje
 # ─────────────────────────────────────────
-
 def procesar_mensaje(identificador, mensaje_usuario, es_admin):
     global bot_activo
 
     # ── Comandos del administrador ──
     if es_admin:
         cmd = mensaje_usuario.lower().strip()
-
         if cmd.startswith("pausar "):
             id_pausar = mensaje_usuario[7:].strip()
             pausados.add(id_pausar)
             return f"✅ Bot pausado para {id_pausar}"
-
         elif cmd.startswith("activar "):
             id_activar = mensaje_usuario[8:].strip()
             pausados.discard(id_activar)
             return f"✅ Bot reactivado para {id_activar}"
-
         elif cmd == "lista":
             if pausados:
                 return "📋 Conversaciones pausadas:\n" + "\n".join(pausados)
             return "✅ No hay conversaciones pausadas."
-
         elif cmd == "pausar todo":
             bot_activo = False
             return "⏸️ Bot pausado para todos los usuarios."
-
         elif cmd == "activar todo":
             bot_activo = True
             return "▶️ Bot reactivado para todos los usuarios."
-
         elif cmd == "estado":
             estado = "✅ Activo" if bot_activo else "⏸️ Pausado globalmente"
             return (
@@ -368,18 +327,15 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
                 f"• Conversaciones activas: {len(conversaciones)}\n"
                 f"• Usuarios pausados: {len(pausados)}"
             )
-
         elif cmd.startswith("borrar "):
             id_borrar = mensaje_usuario[7:].strip()
             if id_borrar in conversaciones:
                 del conversaciones[id_borrar]
                 return f"🗑️ Historial borrado para {id_borrar}"
             return f"No encontré conversación activa para {id_borrar}"
-
         elif cmd == "borrar todo":
             conversaciones.clear()
             return "🗑️ Todos los historiales borrados."
-
         elif cmd == "ayuda":
             return (
                 "📖 Comandos disponibles:\n\n"
@@ -397,7 +353,6 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
     # ── Verificaciones antes de responder ──
     if not bot_activo:
         return None
-
     if identificador in pausados:
         return None
 
@@ -434,43 +389,40 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
         conversaciones[identificador].pop()
         return "Lo siento, tuve un problema técnico. Por favor intenta de nuevo en un momento. 🙏"
 
-
 # ─────────────────────────────────────────
 # RUTA DE SALUD (para UptimeRobot)
 # ─────────────────────────────────────────
-
 @app.route("/", methods=["GET"])
 def home():
     return "Bot activo", 200
 
-
 # ─────────────────────────────────────────
 # WHATSAPP VÍA TWILIO (sandbox/producción)
+# ── Comentado: ya no se usa mientras el bot corre 100% sobre la Cloud API
+#    de Meta. Se reactivará cuando se implemente el modelo Tech Provider/ISV
+#    de Twilio para nuevos clientes. ──
 # ─────────────────────────────────────────
-
-@app.route("/whatsapp", methods=["POST"])
-def whatsapp_reply():
-    numero = request.form.get("From")
-    mensaje_usuario = request.form.get("Body")
-
-    if not numero or not mensaje_usuario:
-        return str(MessagingResponse())
-
-    logger.info(f"Twilio - mensaje de {numero}: {mensaje_usuario[:50]}")
-    es_admin = (numero == f"whatsapp:+{NUMERO_ADMIN}")
-
-    respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin)
-
-    resp = MessagingResponse()
-    if respuesta_texto:
-        resp.message(respuesta_texto)
-    return str(resp)
-
+# @app.route("/whatsapp", methods=["POST"])
+# def whatsapp_reply():
+#     numero = request.form.get("From")
+#     mensaje_usuario = request.form.get("Body")
+#
+#     if not numero or not mensaje_usuario:
+#         return str(MessagingResponse())
+#
+#     logger.info(f"Twilio - mensaje de {numero}: {mensaje_usuario[:50]}")
+#
+#     es_admin = (numero == f"whatsapp:+{NUMERO_ADMIN}")
+#     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin)
+#
+#     resp = MessagingResponse()
+#     if respuesta_texto:
+#         resp.message(respuesta_texto)
+#     return str(resp)
 
 # ─────────────────────────────────────────
 # WHATSAPP VÍA META API (oficial)
 # ─────────────────────────────────────────
-
 @app.route("/whatsapp_meta", methods=["GET"])
 def verificar_webhook_meta():
     mode = request.args.get("hub.mode")
@@ -482,26 +434,26 @@ def verificar_webhook_meta():
         return challenge, 200
     return "Token inválido", 403
 
-
-@app.route('/privacy.html') 
+@app.route('/privacy.html')
 def privacy():
     return send_from_directory('.', 'privacy.html')
-
 
 @app.route("/whatsapp_meta", methods=["POST"])
 def whatsapp_meta_reply():
     datos = request.get_json()
-    logger.info(f"PAYLOAD COMPLETO: {json.dumps(datos)}")
-    
+
     try:
         entrada = datos["entry"][0]["changes"][0]["value"]
         mensajes = entrada.get("messages", [])
-
         if not mensajes:
             return "OK", 200
 
         mensaje_evento = mensajes[0]
+
+        # Soporta tanto números de teléfono normales ("from") como
+        # identificadores BSUID de usuarios con username ("from_user_id")
         numero = mensaje_evento.get("from") or mensaje_evento.get("from_user_id")
+
         tipo = mensaje_evento.get("type", "text")
 
         # ── Manejo de imágenes (comprobantes de pago) ──
@@ -523,13 +475,13 @@ def whatsapp_meta_reply():
 
         mensaje_usuario = mensaje_evento["text"]["body"]
 
-    except (KeyError, IndexError) as e: 
-        logger.error(f"Error extrayendo mensaje: {e}") 
+    except (KeyError, IndexError) as e:
+        logger.error(f"Error extrayendo mensaje: {e}")
         return "OK", 200
 
     logger.info(f"Meta - mensaje de {numero}: {mensaje_usuario[:50]}")
-    es_admin = (numero == NUMERO_ADMIN)
 
+    es_admin = (numero == NUMERO_ADMIN)
     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin)
 
     if respuesta_texto:
@@ -537,9 +489,13 @@ def whatsapp_meta_reply():
 
     return "OK", 200
 
-
 def enviar_mensaje_whatsapp(numero_destino, texto):
-    """Envía un mensaje de texto vía Meta WhatsApp API."""
+    """Envía un mensaje de texto vía Meta WhatsApp API.
+
+    Detecta automáticamente si numero_destino es un número de teléfono
+    normal o un BSUID (identificador de usuario con username activado,
+    formato "XX.numeros") y usa el campo correcto ("to" o "recipient").
+    """
     url = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
     headers = {
         "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
@@ -551,7 +507,6 @@ def enviar_mensaje_whatsapp(numero_destino, texto):
         "text": {"body": texto}
     }
 
-    # Detecta si es un BSUID (formato XX.numeros) o un teléfono normal
     if len(numero_destino) > 2 and numero_destino[2] == "." and numero_destino[:2].isalpha():
         payload["recipient"] = numero_destino
     else:
