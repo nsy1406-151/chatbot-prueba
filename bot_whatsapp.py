@@ -547,13 +547,18 @@ def enviar_mensaje_whatsapp(numero_destino, texto):
     }
     payload = {
         "messaging_product": "whatsapp",
-        "to": numero_destino,
         "type": "text",
         "text": {"body": texto}
     }
+
+    # Detecta si es un BSUID (formato XX.numeros) o un teléfono normal
+    if len(numero_destino) > 2 and numero_destino[2] == "." and numero_destino[:2].isalpha():
+        payload["recipient"] = numero_destino
+    else:
+        payload["to"] = numero_destino
+
     response = req.post(url, headers=headers, json=payload)
     logger.info(f"Meta API response: {response.status_code}")
-
 
 if __name__ == "__main__":
     app.run(port=5000)
