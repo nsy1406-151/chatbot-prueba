@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, send_from_directory
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client as TwilioClient
 from openai import OpenAI
@@ -481,6 +481,11 @@ def verificar_webhook_meta():
         logger.info("Webhook de Meta verificado correctamente")
         return challenge, 200
     return "Token inválido", 403
+
+
+@app.route('/privacy.html') 
+def privacy():
+    return send_from_directory('.', 'privacy.html')
 
 
 @app.route("/whatsapp_meta", methods=["POST"])
