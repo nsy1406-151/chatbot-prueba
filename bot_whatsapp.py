@@ -31,12 +31,37 @@ app = Flask(__name__)
 NUMERO_ADMIN = os.getenv("NUMERO_ADMIN", "573152251406")
 VERIFY_TOKEN_META = os.getenv("VERIFY_TOKEN_META", "botdemo2026")
 MAX_MENSAJES = 20
-SHEET_ID = os.getenv("SHEET_ID")
 
 # ── Variables de Twilio: comentadas junto con el resto del código Twilio ──
 # TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 # TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 # TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
+
+# ─────────────────────────────────────────
+# CONFIGURACIÓN DE NEGOCIOS (multi-cliente)
+# ─────────────────────────────────────────
+# La clave es el "phone_number_id" de Meta — el ID interno del número de
+# WhatsApp AL QUE le escribió el cliente (no el número del cliente).
+# Lo ves en WhatsApp Manager > Números de teléfono > tu número > detalles,
+# o en el payload entrante como entry[0].changes[0].value.metadata.phone_number_id.
+#
+# Cada negocio tiene su propio archivo de instrucciones y su propia hoja
+# de Google Sheets para el inventario.
+NEGOCIOS_CONFIG = {
+    "1290940880772557": {  # Urbana Style (número de pruebas actual)
+        "archivo": "negocios/urbana_style.txt",
+        "sheet_id": os.getenv("SHEET_ID"),
+    },
+    # "OTRO_PHONE_NUMBER_ID_AQUI": {
+    #     "archivo": "negocios/otro_negocio.txt",
+    #     "sheet_id": "otro_sheet_id_de_google",
+    # },
+}
+
+NEGOCIO_DEFAULT = {
+    "archivo": "negocio.txt",
+    "sheet_id": os.getenv("SHEET_ID"),
+}
 
 # ─────────────────────────────────────────
 # ESTADO DEL BOT
@@ -48,8 +73,10 @@ bot_activo = True
 # ─────────────────────────────────────────
 # GOOGLE SHEETS: LEER INVENTARIO
 # ─────────────────────────────────────────
-def obtener_inventario():
+def obtener_inventario(sheet_id):
     """Lee el inventario desde Google Sheets en tiempo real."""
+    if not sheet_id:
+        return ""
     try:
         scope = [
             "https://spreadsheets.google.com/feeds",
@@ -58,9 +85,9 @@ def obtener_inventario():
         creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
         creds = Credentials.from_service_account_info(creds_json, scopes=scope)
         gc = gspread.authorize(creds)
-        hoja = gc.open_by_key(SHEET_ID).sheet1
+        hoja = gc.open_by_key(sheet_id).sheet1
         datos = hoja.get_all_records()
-        logger.info(f"Google Sheets: {len(datos)} filas leídas")
+        logger.info(f"Google Sheets ({sheet_id[:8]}...): {len(datos)} filas leídas")
 
         if not datos:
             return ""
@@ -76,33 +103,38 @@ def obtener_inventario():
 
         return inventario_texto
     except Exception as e:
-        logger.error(f"Error leyendo Google Sheets: {e}")
+        logger.error(f"Error leyendo Google Sheets ({sheet_id}): {e}")
         return ""
 
 # ─────────────────────────────────────────
 # CARGA DE INFORMACIÓN DEL NEGOCIO
 # ─────────────────────────────────────────
-def cargar_info_negocio(numero=None):
-    negocios = {
-        # "573001234567": "negocios/cliente1.txt",
-    }
-    archivo = negocios.get(numero, "negocio.txt")
+def obtener_config_negocio(phone_number_id):
+    """Devuelve la config (archivo + sheet_id) según el número de WhatsApp
+    AL QUE le escribieron (no el número del cliente)."""
+    return NEGOCIOS_CONFIG.get(phone_number_id, NEGOCIO_DEFAULT)
+
+def cargar_info_negocio(phone_number_id):
+    config = obtener_config_negocio(phone_number_id)
+    archivo = config["archivo"]
     try:
         with open(archivo, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
+        logger.error(f"No se encontró {archivo}, usando negocio.txt por defecto")
         with open("negocio.txt", "r", encoding="utf-8") as f:
             return f.read()
 
-def crear_system_message(numero=None):
+def crear_system_message(phone_number_id):
     """Crea el system message con info del negocio, inventario y flujo de compra.
 
     Toda la identidad del negocio (nombre, saludo, dirección, datos de pago)
-    debe venir de negocio.txt — así el mismo código sirve para cualquier
-    cliente sin tener que tocar este prompt.
+    viene de su archivo negocio.txt correspondiente — así el mismo código
+    sirve para cualquier cantidad de negocios sin tocar este prompt.
     """
-    info = cargar_info_negocio(numero)
-    inventario = obtener_inventario()
+    config = obtener_config_negocio(phone_number_id)
+    info = cargar_info_negocio(phone_number_id)
+    inventario = obtener_inventario(config["sheet_id"])
 
     return {
         "role": "system",
@@ -178,10 +210,11 @@ REGLAS IMPORTANTES:
 # ─────────────────────────────────────────
 # NOTIFICACIONES AL ADMIN
 # ─────────────────────────────────────────
-def notificar_admin_texto(mensaje):
-    """Envía mensaje de texto al admin por Meta API."""
+def notificar_admin_texto(mensaje, phone_number_id):
+    """Envía mensaje de texto al admin por Meta API, desde el mismo número
+    de negocio donde ocurrió el evento."""
     try:
-        enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje)
+        enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje, phone_number_id)
         logger.info("Notificación texto enviada al admin por Meta API")
     except Exception as e:
         logger.error(f"Error notificando admin por Meta: {e}")
@@ -199,7 +232,7 @@ def notificar_admin_texto(mensaje):
     # except Exception as e:
     #     logger.error(f"Error notificando admin por Twilio: {e}")
 
-def notificar_admin_imagen(image_id, numero_cliente):
+def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
     """Reenvía imagen (comprobante de pago) al admin vía Meta API."""
     try:
         url_info = f"https://graph.facebook.com/v19.0/{image_id}"
@@ -211,7 +244,7 @@ def notificar_admin_imagen(image_id, numero_cliente):
             logger.error("No se pudo obtener la URL de la imagen")
             return
 
-        url_send = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+        url_send = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
             "to": NUMERO_ADMIN,
@@ -236,7 +269,7 @@ def notificar_admin_imagen(image_id, numero_cliente):
 # ─────────────────────────────────────────
 # PROCESAMIENTO DE EVENTOS ESPECIALES
 # ─────────────────────────────────────────
-def procesar_respuesta(respuesta_texto, identificador):
+def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
     """
     Procesa la respuesta del bot buscando eventos especiales:
     - Solicitudes de atención humana
@@ -257,7 +290,7 @@ def procesar_respuesta(respuesta_texto, identificador):
             f"📱 Cliente: +{numero_limpio}\n\n"
             f"_El cliente quiere hablar con una persona del equipo._"
         )
-        notificar_admin_texto(mensaje_admin)
+        notificar_admin_texto(mensaje_admin, phone_number_id)
         logger.info(f"Atención humana solicitada por {numero_limpio}")
 
     # ── Detectar pedido confirmado ──
@@ -282,7 +315,7 @@ def procesar_respuesta(respuesta_texto, identificador):
                         f"📱 *Cliente:* +{numero_limpio}\n\n"
                         f"_Responde directamente al cliente para coordinar._"
                     )
-                    notificar_admin_texto(mensaje_admin)
+                    notificar_admin_texto(mensaje_admin, phone_number_id)
                     logger.info(f"Pedido confirmado — notificación enviada al admin")
                 except Exception as e:
                     logger.error(f"Error procesando pedido confirmado: {e}")
@@ -295,7 +328,7 @@ def procesar_respuesta(respuesta_texto, identificador):
 # ─────────────────────────────────────────
 # FUNCIÓN CENTRAL: procesa cualquier mensaje
 # ─────────────────────────────────────────
-def procesar_mensaje(identificador, mensaje_usuario, es_admin):
+def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
     global bot_activo
 
     # ── Comandos del administrador ──
@@ -357,36 +390,41 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin):
         return None
 
     # ── Lógica normal del chatbot ──
-    if identificador not in conversaciones:
-        conversaciones[identificador] = [crear_system_message(identificador)]
+    # Nota: la conversación se identifica por negocio + cliente, para que
+    # el mismo cliente pueda hablar con dos negocios distintos sin mezclar
+    # el historial de una conversación con la otra.
+    clave_conversacion = f"{phone_number_id}:{identificador}"
+
+    if clave_conversacion not in conversaciones:
+        conversaciones[clave_conversacion] = [crear_system_message(phone_number_id)]
     else:
-        conversaciones[identificador][0] = crear_system_message(identificador)
+        conversaciones[clave_conversacion][0] = crear_system_message(phone_number_id)
 
-    conversaciones[identificador].append({"role": "user", "content": mensaje_usuario})
+    conversaciones[clave_conversacion].append({"role": "user", "content": mensaje_usuario})
 
-    if len(conversaciones[identificador]) > MAX_MENSAJES + 1:
-        conversaciones[identificador] = (
-            [conversaciones[identificador][0]] +
-            conversaciones[identificador][-MAX_MENSAJES:]
+    if len(conversaciones[clave_conversacion]) > MAX_MENSAJES + 1:
+        conversaciones[clave_conversacion] = (
+            [conversaciones[clave_conversacion][0]] +
+            conversaciones[clave_conversacion][-MAX_MENSAJES:]
         )
 
     try:
         respuesta = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=conversaciones[identificador]
+            messages=conversaciones[clave_conversacion]
         )
         respuesta_texto = respuesta.choices[0].message.content
 
         # Procesar eventos especiales (pedidos, atención humana)
-        respuesta_texto = procesar_respuesta(respuesta_texto, identificador)
+        respuesta_texto = procesar_respuesta(respuesta_texto, identificador, phone_number_id)
 
-        conversaciones[identificador].append({"role": "assistant", "content": respuesta_texto})
-        logger.info(f"Respuesta generada para {identificador[:8]}...")
+        conversaciones[clave_conversacion].append({"role": "assistant", "content": respuesta_texto})
+        logger.info(f"Respuesta generada para {identificador[:8]}... (negocio {phone_number_id})")
         return respuesta_texto
 
     except Exception as e:
         logger.error(f"Error OpenAI: {e}")
-        conversaciones[identificador].pop()
+        conversaciones[clave_conversacion].pop()
         return "Lo siento, tuve un problema técnico. Por favor intenta de nuevo en un momento. 🙏"
 
 # ─────────────────────────────────────────
@@ -413,7 +451,7 @@ def home():
 #     logger.info(f"Twilio - mensaje de {numero}: {mensaje_usuario[:50]}")
 #
 #     es_admin = (numero == f"whatsapp:+{NUMERO_ADMIN}")
-#     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin)
+#     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, None)
 #
 #     resp = MessagingResponse()
 #     if respuesta_texto:
@@ -448,6 +486,9 @@ def whatsapp_meta_reply():
         if not mensajes:
             return "OK", 200
 
+        # ── Clave del enrutamiento multi-negocio: el número AL QUE escribieron ──
+        phone_number_id = entrada["metadata"]["phone_number_id"]
+
         mensaje_evento = mensajes[0]
 
         # Soporta tanto números de teléfono normales ("from") como
@@ -459,17 +500,19 @@ def whatsapp_meta_reply():
         # ── Manejo de imágenes (comprobantes de pago) ──
         if tipo == "image":
             image_id = mensaje_evento["image"]["id"]
-            notificar_admin_imagen(image_id, numero)
+            notificar_admin_imagen(image_id, numero, phone_number_id)
             enviar_mensaje_whatsapp(
                 numero,
-                "✅ ¡Recibimos tu comprobante de pago! Lo verificaremos y coordinaremos tu pedido pronto. ¡Gracias! 🙏"
+                "✅ ¡Recibimos tu comprobante de pago! Lo verificaremos y coordinaremos tu pedido pronto. ¡Gracias! 🙏",
+                phone_number_id
             )
             return "OK", 200
 
         if tipo != "text":
             enviar_mensaje_whatsapp(
                 numero,
-                "Por el momento solo puedo responder mensajes de texto e imágenes. 😊"
+                "Por el momento solo puedo responder mensajes de texto e imágenes. 😊",
+                phone_number_id
             )
             return "OK", 200
 
@@ -479,24 +522,25 @@ def whatsapp_meta_reply():
         logger.error(f"Error extrayendo mensaje: {e}")
         return "OK", 200
 
-    logger.info(f"Meta - mensaje de {numero}: {mensaje_usuario[:50]}")
+    logger.info(f"Meta - mensaje de {numero} a negocio {phone_number_id}: {mensaje_usuario[:50]}")
 
     es_admin = (numero == NUMERO_ADMIN)
-    respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin)
+    respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, phone_number_id)
 
     if respuesta_texto:
-        enviar_mensaje_whatsapp(numero, respuesta_texto)
+        enviar_mensaje_whatsapp(numero, respuesta_texto, phone_number_id)
 
     return "OK", 200
 
-def enviar_mensaje_whatsapp(numero_destino, texto):
-    """Envía un mensaje de texto vía Meta WhatsApp API.
+def enviar_mensaje_whatsapp(numero_destino, texto, phone_number_id):
+    """Envía un mensaje de texto vía Meta WhatsApp API, DESDE el mismo
+    número de negocio (phone_number_id) donde llegó el mensaje original.
 
     Detecta automáticamente si numero_destino es un número de teléfono
     normal o un BSUID (identificador de usuario con username activado,
     formato "XX.numeros") y usa el campo correcto ("to" o "recipient").
     """
-    url = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
     headers = {
         "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
         "Content-Type": "application/json"
