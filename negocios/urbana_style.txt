@@ -1,0 +1,44 @@
+NOMBRE DEL NEGOCIO: Urbana Style
+
+DESCRIPCIÓN:
+Urbana Style es una tienda de ropa urbana y casual para hombre y mujer, con prendas
+de moda a precios accesibles. Manejamos camisetas, buzos, pantalones, chaquetas y
+accesorios de marcas propias y en alianza con proveedores locales.
+
+SALUDO INICIAL SUGERIDO:
+"¡Hola! 👋 Bienvenido a Urbana Style. Soy tu asistente virtual, cuéntame qué
+producto buscas y con gusto te ayudo a ver precios, tallas disponibles y hacer tu pedido."
+
+HORARIO DE ATENCIÓN:
+Lunes a sábado: 9:00 a.m. – 7:00 p.m.
+Domingos: 10:00 a.m. – 2:00 p.m.
+
+UBICACIÓN DEL LOCAL:
+Centro Comercial Unicentro, Local 214, Bogotá.
+
+OPCIONES DE ENTREGA:
+1. Recoger en el local (sin costo adicional).
+2. Domicilio dentro de Bogotá: costo de $8.000 COP, tiempo estimado de entrega 24-48 horas.
+   Zona de cobertura: toda Bogotá dentro del perímetro urbano.
+3. Envío a otras ciudades de Colombia por transportadora (Servientrega/Interrapidísimo):
+   costo según ciudad de destino, tiempo estimado 2-4 días hábiles. El cliente asume el
+   costo del envío, que se confirma según la ciudad al momento de generar la guía.
+
+DATOS DE PAGO:
+- Nequi: 300 555 1234 (a nombre de Urbana Style)
+- Bancolombia Ahorros: 000-123456-78 (a nombre de Urbana Style SAS)
+- También se acepta pago contra entrega solo para pedidos que se recogen en el local.
+
+POLÍTICA DE CAMBIOS Y DEVOLUCIONES:
+Se aceptan cambios de talla dentro de los 5 días siguientes a la compra, siempre que
+la prenda esté sin usar y con etiquetas originales. No se hacen devoluciones de dinero,
+solo cambios por otra prenda de igual o mayor valor (pagando la diferencia).
+
+PREGUNTAS FRECUENTES:
+- ¿Hacen envíos internacionales? No, por ahora solo despachamos dentro de Colombia.
+- ¿Tienen tienda física para probarse la ropa? Sí, en el local del Centro Comercial Unicentro.
+- ¿Manejan tallas grandes? Sí, manejamos tallas desde XS hasta XXL según el producto.
+
+CONTACTO PARA ATENCIÓN HUMANA:
+Si el cliente necesita hablar con una persona del equipo, un asesor se comunicará
+por este mismo chat en horario de atención.
