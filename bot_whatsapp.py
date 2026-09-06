@@ -42,11 +42,6 @@ MAX_MENSAJES = 20
 # ─────────────────────────────────────────
 # La clave es el "phone_number_id" de Meta — el ID interno del número de
 # WhatsApp AL QUE le escribió el cliente (no el número del cliente).
-# Lo ves en WhatsApp Manager > Números de teléfono > tu número > detalles,
-# o en el payload entrante como entry[0].changes[0].value.metadata.phone_number_id.
-#
-# Cada negocio tiene su propio archivo de instrucciones y su propia hoja
-# de Google Sheets para el inventario.
 NEGOCIOS_CONFIG = {
     "1290940880772557": {  # Urbana Style (número de pruebas actual)
         "archivo": "negocios/urbana_style.txt",
@@ -69,6 +64,40 @@ NEGOCIO_DEFAULT = {
 conversaciones = {}
 pausados = set()
 bot_activo = True
+
+# Relación username de WhatsApp ↔ identificador real (número o BSUID).
+# Permite usar el username directamente en comandos de admin
+# (ej. "pausar julianp1406") en vez del código largo o el número.
+USERNAME_A_ID = {}
+ID_A_USERNAME = {}
+
+def registrar_username(identificador, username):
+    """Guarda la relación username ↔ identificador cuando llega un mensaje."""
+    if not username:
+        return
+    USERNAME_A_ID[username.lower()] = identificador
+    ID_A_USERNAME[identificador] = username
+
+def resolver_identificador(texto):
+    """Si el texto dado es un username conocido, lo traduce al identificador
+    real. Si no, lo devuelve tal cual (asumiendo que ya es número o BSUID)."""
+    return USERNAME_A_ID.get(texto.lower().strip(), texto.strip())
+
+def formatear_identificador_cliente(identificador):
+    """Da un formato legible al identificador del cliente para las
+    notificaciones al admin, incluyendo el username si lo tenemos."""
+    numero_limpio = identificador.replace("whatsapp:+", "").replace("whatsapp:", "")
+    username = ID_A_USERNAME.get(identificador)
+    es_bsuid = len(numero_limpio) > 2 and numero_limpio[2] == "." and numero_limpio[:2].isalpha()
+
+    if es_bsuid:
+        if username:
+            return f"@{username} (no compartió su número — usa este username en los comandos)"
+        return f"{numero_limpio} (usuario con username, no compartió su número)"
+
+    if username:
+        return f"+{numero_limpio} (@{username})"
+    return f"+{numero_limpio}"
 
 # ─────────────────────────────────────────
 # GOOGLE SHEETS: LEER INVENTARIO
@@ -110,8 +139,6 @@ def obtener_inventario(sheet_id):
 # CARGA DE INFORMACIÓN DEL NEGOCIO
 # ─────────────────────────────────────────
 def obtener_config_negocio(phone_number_id):
-    """Devuelve la config (archivo + sheet_id) según el número de WhatsApp
-    AL QUE le escribieron (no el número del cliente)."""
     return NEGOCIOS_CONFIG.get(phone_number_id, NEGOCIO_DEFAULT)
 
 def cargar_info_negocio(phone_number_id):
@@ -151,15 +178,13 @@ IDENTIDAD Y PRESENTACIÓN:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - Usa el nombre del negocio tal como aparece en la información a continuación.
 - Cuando alguien te salude por primera vez o pregunte quién eres, preséntate mencionando el nombre del negocio y ofrece ayuda con productos, precios, disponibilidad y pedidos.
+- NUNCA vuelvas a presentarte ni a repetir el saludo inicial una vez la conversación ya está en curso — solo preséntate en el primerísimo mensaje del cliente.
+- Si el cliente agradece o se despide después de un pedido confirmado (ej. "gracias", "listo", "perfecto"), responde con un cierre breve y amable como "¡Con gusto! Cualquier cosa me escribes 😊", sin reiniciar el flujo ni presentarte de nuevo.
 
 INFORMACIÓN DEL NEGOCIO:
 {info}
 
 {inventario}
-
-
-- NUNCA vuelvas a presentarte ni a repetir el saludo inicial una vez la conversación ya está en curso — solo preséntate en el primerísimo mensaje del cliente.
-- Si el cliente agradece o se despide después de un pedido confirmado (ej. "gracias", "listo", "perfecto"), responde con un cierre breve y amable como "¡Con gusto! Cualquier cosa me escribes 😊", sin reiniciar el flujo ni presentarte de nuevo.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SOLICITUD DE ATENCIÓN HUMANA:
@@ -248,6 +273,8 @@ def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
             logger.error("No se pudo obtener la URL de la imagen")
             return
 
+        cliente_display = formatear_identificador_cliente(numero_cliente)
+
         url_send = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
@@ -255,7 +282,7 @@ def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
             "type": "image",
             "image": {
                 "link": image_url,
-                "caption": f"📸 *Comprobante de pago recibido*\n👤 Cliente: +{numero_cliente}"
+                "caption": f"📸 *Comprobante de pago recibido*\n👤 Cliente: {cliente_display}"
             }
         }
         req.post(
@@ -280,22 +307,18 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
     - Pedidos confirmados
     Retorna la respuesta limpia sin las líneas internas.
     """
-    numero_limpio = (
-        identificador
-        .replace("whatsapp:+", "")
-        .replace("whatsapp:", "")
-    )
+    cliente_display = formatear_identificador_cliente(identificador)
 
     # ── Detectar solicitud de atención humana ──
     if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
         respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
         mensaje_admin = (
             f"🙋 *Atención humana solicitada*\n\n"
-            f"📱 Cliente: +{numero_limpio}\n\n"
+            f"📱 Cliente: {cliente_display}\n\n"
             f"_El cliente quiere hablar con una persona del equipo._"
         )
         notificar_admin_texto(mensaje_admin, phone_number_id)
-        logger.info(f"Atención humana solicitada por {numero_limpio}")
+        logger.info(f"Atención humana solicitada por {identificador}")
 
     # ── Detectar pedido confirmado ──
     if "PEDIDO_CONFIRMADO|" in respuesta_texto:
@@ -316,7 +339,7 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
                         f"🚚 *Entrega:* {entrega}\n"
                         f"📍 *Dirección:* {direccion}\n"
                         f"💰 *Total:* {total}\n\n"
-                        f"📱 *Cliente:* +{numero_limpio}\n\n"
+                        f"📱 *Cliente:* {cliente_display}\n\n"
                         f"_Responde directamente al cliente para coordinar._"
                     )
                     notificar_admin_texto(mensaje_admin, phone_number_id)
@@ -339,11 +362,11 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
     if es_admin:
         cmd = mensaje_usuario.lower().strip()
         if cmd.startswith("pausar "):
-            id_pausar = mensaje_usuario[7:].strip()
+            id_pausar = resolver_identificador(mensaje_usuario[7:])
             pausados.add(id_pausar)
             return f"✅ Bot pausado para {id_pausar}"
         elif cmd.startswith("activar "):
-            id_activar = mensaje_usuario[8:].strip()
+            id_activar = resolver_identificador(mensaje_usuario[8:])
             pausados.discard(id_activar)
             return f"✅ Bot reactivado para {id_activar}"
         elif cmd == "lista":
@@ -365,9 +388,10 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
                 f"• Usuarios pausados: {len(pausados)}"
             )
         elif cmd.startswith("borrar "):
-            id_borrar = mensaje_usuario[7:].strip()
-            if id_borrar in conversaciones:
-                del conversaciones[id_borrar]
+            id_borrar = resolver_identificador(mensaje_usuario[7:])
+            clave_borrar = f"{phone_number_id}:{id_borrar}"
+            if clave_borrar in conversaciones:
+                del conversaciones[clave_borrar]
                 return f"🗑️ Historial borrado para {id_borrar}"
             return f"No encontré conversación activa para {id_borrar}"
         elif cmd == "borrar todo":
@@ -376,15 +400,16 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
         elif cmd == "ayuda":
             return (
                 "📖 Comandos disponibles:\n\n"
-                "• *pausar [número]* — pausa el bot para ese usuario\n"
-                "• *activar [número]* — reactiva el bot para ese usuario\n"
+                "• *pausar [número o @username]* — pausa el bot para ese usuario\n"
+                "• *activar [número o @username]* — reactiva el bot para ese usuario\n"
                 "• *pausar todo* — pausa el bot para todos\n"
                 "• *activar todo* — reactiva el bot para todos\n"
                 "• *lista* — muestra usuarios pausados\n"
                 "• *estado* — muestra el estado actual del bot\n"
-                "• *borrar [número]* — borra el historial de un usuario\n"
+                "• *borrar [número o @username]* — borra el historial de un usuario\n"
                 "• *borrar todo* — borra todos los historiales\n"
-                "• *ayuda* — muestra este menú"
+                "• *ayuda* — muestra este menú\n\n"
+                "_Puedes usar el número, el username (sin @) o el código completo, según lo que te haya mostrado la notificación._"
             )
 
     # ── Verificaciones antes de responder ──
@@ -394,9 +419,8 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
         return None
 
     # ── Lógica normal del chatbot ──
-    # Nota: la conversación se identifica por negocio + cliente, para que
-    # el mismo cliente pueda hablar con dos negocios distintos sin mezclar
-    # el historial de una conversación con la otra.
+    # La conversación se identifica por negocio + cliente, para que el mismo
+    # cliente pueda hablar con dos negocios distintos sin mezclar historiales.
     clave_conversacion = f"{phone_number_id}:{identificador}"
 
     if clave_conversacion not in conversaciones:
@@ -419,7 +443,6 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
         )
         respuesta_texto = respuesta.choices[0].message.content
 
-        # Procesar eventos especiales (pedidos, atención humana)
         respuesta_texto = procesar_respuesta(respuesta_texto, identificador, phone_number_id)
 
         conversaciones[clave_conversacion].append({"role": "assistant", "content": respuesta_texto})
@@ -498,6 +521,12 @@ def whatsapp_meta_reply():
         # Soporta tanto números de teléfono normales ("from") como
         # identificadores BSUID de usuarios con username ("from_user_id")
         numero = mensaje_evento.get("from") or mensaje_evento.get("from_user_id")
+
+        # ── Guarda la relación username ↔ identificador, si viene en el payload ──
+        contactos = entrada.get("contacts", [])
+        if contactos:
+            username = contactos[0].get("username")
+            registrar_username(numero, username)
 
         tipo = mensaje_evento.get("type", "text")
 
