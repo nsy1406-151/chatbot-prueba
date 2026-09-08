@@ -652,8 +652,8 @@ def instagram_reply():
     return "OK", 200
 
 def enviar_mensaje_instagram(destinatario_id, texto):
-    """Envía un mensaje de texto vía Instagram Messaging API."""
-    url = f"https://graph.facebook.com/v19.0/{INSTAGRAM_ACCOUNT_ID}/messages"
+    """Envía un mensaje de texto vía Instagram API (con Instagram Login)."""
+    url = f"https://graph.instagram.com/v21.0/{INSTAGRAM_ACCOUNT_ID}/messages"
     headers = {
         "Authorization": f"Bearer {os.getenv('INSTAGRAM_ACCESS_TOKEN')}",
         "Content-Type": "application/json"
