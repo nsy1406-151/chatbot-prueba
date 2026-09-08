@@ -621,14 +621,16 @@ def instagram_reply():
         evento = mensajeria[0]
         numero = evento["sender"]["id"]
 
-        # Instagram manda un evento "echo" cuando TÚ mandas el mensaje
-        # (para sincronizar con la app de Instagram) — hay que ignorarlo
-        # para que el bot no se responda a sí mismo.
-        if evento.get("message", {}).get("is_echo"):
+        # Ignorar cualquier evento que no sea un mensaje real (echos,
+        # confirmaciones de entrega/lectura, reacciones, etc.) — responder
+        # a esos causa un bucle infinito de notificaciones.
+        if "message" not in evento or evento["message"].get("is_echo"):
             return "OK", 200
 
-        mensaje_usuario = evento.get("message", {}).get("text")
+        mensaje_usuario = evento["message"].get("text")
         if not mensaje_usuario:
+            # Es un mensaje real (imagen, sticker, etc.) pero sin texto —
+            # aquí sí responde, una sola vez, porque es un mensaje nuevo.
             enviar_mensaje_instagram(
                 numero,
                 "Por el momento solo puedo responder mensajes de texto. 😊"
@@ -641,8 +643,6 @@ def instagram_reply():
 
     logger.info(f"Instagram - mensaje de {numero}: {mensaje_usuario[:50]}")
 
-    # Usamos el ID de la cuenta de Instagram como "phone_number_id" para
-    # que el enrutamiento multi-negocio funcione igual que en WhatsApp.
     es_admin = (numero == NUMERO_ADMIN)
     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, INSTAGRAM_ACCOUNT_ID)
 
