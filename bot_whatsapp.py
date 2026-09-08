@@ -592,5 +592,78 @@ def enviar_mensaje_whatsapp(numero_destino, texto, phone_number_id):
     response = req.post(url, headers=headers, json=payload)
     logger.info(f"Meta API response: {response.status_code}")
 
+# ─────────────────────────────────────────
+# INSTAGRAM VÍA META API (oficial)
+# ─────────────────────────────────────────
+INSTAGRAM_ACCOUNT_ID = "17841443710781118"  # chatbots.co
+
+@app.route("/instagram", methods=["GET"])
+def verificar_webhook_instagram():
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+
+    if mode == "subscribe" and token == VERIFY_TOKEN_META:
+        logger.info("Webhook de Instagram verificado correctamente")
+        return challenge, 200
+    return "Token inválido", 403
+
+@app.route("/instagram", methods=["POST"])
+def instagram_reply():
+    datos = request.get_json()
+
+    try:
+        entrada = datos["entry"][0]
+        mensajeria = entrada.get("messaging", [])
+        if not mensajeria:
+            return "OK", 200
+
+        evento = mensajeria[0]
+        numero = evento["sender"]["id"]
+
+        # Instagram manda un evento "echo" cuando TÚ mandas el mensaje
+        # (para sincronizar con la app de Instagram) — hay que ignorarlo
+        # para que el bot no se responda a sí mismo.
+        if evento.get("message", {}).get("is_echo"):
+            return "OK", 200
+
+        mensaje_usuario = evento.get("message", {}).get("text")
+        if not mensaje_usuario:
+            enviar_mensaje_instagram(
+                numero,
+                "Por el momento solo puedo responder mensajes de texto. 😊"
+            )
+            return "OK", 200
+
+    except (KeyError, IndexError) as e:
+        logger.error(f"Error extrayendo mensaje de Instagram: {e}")
+        return "OK", 200
+
+    logger.info(f"Instagram - mensaje de {numero}: {mensaje_usuario[:50]}")
+
+    # Usamos el ID de la cuenta de Instagram como "phone_number_id" para
+    # que el enrutamiento multi-negocio funcione igual que en WhatsApp.
+    es_admin = (numero == NUMERO_ADMIN)
+    respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, INSTAGRAM_ACCOUNT_ID)
+
+    if respuesta_texto:
+        enviar_mensaje_instagram(numero, respuesta_texto)
+
+    return "OK", 200
+
+def enviar_mensaje_instagram(destinatario_id, texto):
+    """Envía un mensaje de texto vía Instagram Messaging API."""
+    url = f"https://graph.facebook.com/v19.0/{INSTAGRAM_ACCOUNT_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('INSTAGRAM_ACCESS_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "recipient": {"id": destinatario_id},
+        "message": {"text": texto}
+    }
+    response = req.post(url, headers=headers, json=payload)
+    logger.info(f"Instagram API response: {response.status_code}")
+
 if __name__ == "__main__":
     app.run(port=5000)
