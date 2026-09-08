@@ -64,6 +64,8 @@ NEGOCIO_DEFAULT = {
 conversaciones = {}
 pausados = set()
 bot_activo = True
+mensajes_procesados = set()
+MAX_MENSAJES_PROCESADOS = 500
 
 # Relación username de WhatsApp ↔ identificador real (número o BSUID).
 # Permite usar el username directamente en comandos de admin
