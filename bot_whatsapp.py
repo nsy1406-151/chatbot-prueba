@@ -627,6 +627,26 @@ def instagram_reply():
         if "message" not in evento or evento["message"].get("is_echo"):
             return "OK", 200
 
+        # Ignorar mensajes duplicados (Meta reintenta si tarda la respuesta)
+        mid = evento["message"].get("mid")
+        if mid:
+            if mid in mensajes_procesados:
+                logger.info(f"Mensaje duplicado ignorado: {mid}")
+                return "OK", 200
+            mensajes_procesados.add(mid)
+            if len(mensajes_procesados) > MAX_MENSAJES_PROCESADOS:
+                mensajes_procesados.pop()
+
+        mensaje_usuario = evento["message"].get("text")
+        if not mensaje_usuario:
+            # Es un mensaje real (imagen, sticker, etc.) pero sin texto —
+            # aquí sí responde, una sola vez, porque es un mensaje nuevo.
+            enviar_mensaje_instagram(
+                numero,
+                "Por el momento solo puedo responder mensajes de texto. 😊"
+            )
+            return "OK", 200
+
         mensaje_usuario = evento["message"].get("text")
         if not mensaje_usuario:
             # Es un mensaje real (imagen, sticker, etc.) pero sin texto —
