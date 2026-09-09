@@ -505,6 +505,10 @@ def verificar_webhook_meta():
 def privacy():
     return send_from_directory('.', 'privacy.html')
 
+@app.route('/eliminar-datos.html')
+def eliminar_datos():
+    return send_from_directory('.', 'eliminar-datos.html')
+
 @app.route("/whatsapp_meta", methods=["POST"])
 def whatsapp_meta_reply():
     datos = request.get_json()
