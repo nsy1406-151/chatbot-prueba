@@ -744,10 +744,13 @@ def instagram_callback():
     profile = profile_resp.json()
 
     html = (
-        "<h2>Cuenta de Instagram conectada</h2>"
-        "<p><b>Usuario:</b> @" + str(profile.get("username")) + "</p>"
-        "<p><b>Nombre:</b> " + str(profile.get("name")) + "</p>"
-        "<img src='" + str(profile.get("profile_picture_url", "")) + "' width='150'>"
+        "<div style='font-family: sans-serif; max-width: 400px; margin: 60px auto; text-align: center;'>"
+        "<h2 style='color: #262626;'>Conecta tu cuenta de Instagram</h2>"
+        "<p style='color: #555;'>Autoriza el acceso para que el chatbot pueda gestionar tus mensajes.</p>"
+        "<a href='" + auth_url + "' style='display:inline-block; margin-top:20px; padding:12px 24px; "
+        "background:#E1306C; color:white; text-decoration:none; border-radius:8px; font-weight:bold;'>"
+        "Conectar Instagram</a>"
+        "</div>"
     )
     return html
 
