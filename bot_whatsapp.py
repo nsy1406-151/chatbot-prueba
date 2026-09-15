@@ -598,7 +598,7 @@ def enviar_mensaje_whatsapp(numero_destino, texto, phone_number_id):
         payload["to"] = numero_destino
 
     response = req.post(url, headers=headers, json=payload)
-    logger.info(f"Meta API response: {response.status_code}")
+    logger.info(f"Meta API response: {response.status_code} - {response.text}")
 
 # ─────────────────────────────────────────
 # INSTAGRAM VÍA META API (oficial)
