@@ -25,6 +25,8 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 app = Flask(__name__)
 
+
+
 # ─────────────────────────────────────────
 # VARIABLES DE CONFIGURACIÓN
 # ─────────────────────────────────────────
@@ -690,6 +692,64 @@ def enviar_mensaje_instagram(destinatario_id, texto):
     }
     response = req.post(url, headers=headers, json=payload)
     logger.info(f"Instagram API response: {response.status_code}")
+
+IG_LOGIN_APP_ID = os.getenv("IG_LOGIN_APP_ID")
+IG_LOGIN_APP_SECRET = os.getenv("IG_LOGIN_APP_SECRET")
+IG_REDIRECT_URI = "https://chatbot-prueba-0t6r.onrender.com/instagram/callback"
+
+@app.route("/conectar-instagram")
+def conectar_instagram():
+    auth_url = (
+        "https://www.instagram.com/oauth/authorize"
+        "?client_id=" + IG_LOGIN_APP_ID +
+        "&redirect_uri=" + IG_REDIRECT_URI +
+        "&scope=instagram_business_basic,instagram_business_manage_messages"
+        "&response_type=code"
+    )
+    html = (
+        "<h2>Conecta tu cuenta de Instagram</h2>"
+        "<p>Autoriza el acceso para que el chatbot pueda gestionar tus mensajes.</p>"
+        "<a href='" + auth_url + "'><button>Conectar Instagram</button></a>"
+    )
+    return html
+
+@app.route("/instagram/callback")
+def instagram_callback():
+    code = request.args.get("code")
+    if not code:
+        return "No se recibió código de autorización", 400
+
+    token_resp = req.post(
+        "https://api.instagram.com/oauth/access_token",
+        data={
+            "client_id": IG_LOGIN_APP_ID,
+            "client_secret": IG_LOGIN_APP_SECRET,
+            "grant_type": "authorization_code",
+            "redirect_uri": IG_REDIRECT_URI,
+            "code": code,
+        },
+    )
+    token_data = token_resp.json()
+    access_token = token_data.get("access_token")
+    if not access_token:
+        return "Error obteniendo el token: " + str(token_data), 400
+
+    profile_resp = req.get(
+        "https://graph.instagram.com/me",
+        params={
+            "fields": "user_id,username,name,profile_picture_url",
+            "access_token": access_token,
+        },
+    )
+    profile = profile_resp.json()
+
+    html = (
+        "<h2>Cuenta de Instagram conectada</h2>"
+        "<p><b>Usuario:</b> @" + str(profile.get("username")) + "</p>"
+        "<p><b>Nombre:</b> " + str(profile.get("name")) + "</p>"
+        "<img src='" + str(profile.get("profile_picture_url", "")) + "' width='150'>"
+    )
+    return html
 
 if __name__ == "__main__":
     app.run(port=5000)
