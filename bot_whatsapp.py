@@ -507,6 +507,10 @@ def verificar_webhook_meta():
 def privacy():
     return send_from_directory('.', 'privacy.html')
 
+@app.route('/terminos.html')
+def terminos():
+    return send_from_directory('.', 'terminos.html')
+
 @app.route('/eliminar-datos.html')
 def eliminar_datos():
     return send_from_directory('.', 'eliminar-datos.html')
