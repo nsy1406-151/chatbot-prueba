@@ -139,6 +139,51 @@ def obtener_inventario(sheet_id):
         logger.error(f"Error leyendo Google Sheets ({sheet_id}): {e}")
         return ""
 
+
+
+def buscar_foto_producto(sheet_id, producto, talla=None):
+    """Busca la URL de la foto de un producto (y talla, si aplica) en el inventario."""
+    if not sheet_id:
+        return None
+    try:
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
+        gc = gspread.authorize(creds)
+        hoja = gc.open_by_key(sheet_id).sheet1
+        datos = hoja.get_all_records()
+
+        for item in datos:
+            coincide_producto = item.get("Producto", "").strip().lower() == producto.strip().lower()
+            coincide_talla = talla is None or str(item.get("Talla", "")).strip().lower() == talla.strip().lower()
+            if coincide_producto and coincide_talla:
+                return item.get("Foto") or None
+        return None
+    except Exception as e:
+        logger.error(f"Error buscando foto: {e}")
+        return None
+
+def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption=""):
+    """Envía una imagen vía Meta WhatsApp API."""
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "type": "image",
+        "image": {"link": image_url, "caption": caption}
+    }
+    if len(numero_destino) > 2 and numero_destino[2] == "." and numero_destino[:2].isalpha():
+        payload["recipient"] = numero_destino
+    else:
+        payload["to"] = numero_destino
+    response = req.post(url, headers=headers, json=payload)
+    logger.info(f"Meta API (imagen) response: {response.status_code}")
 # ─────────────────────────────────────────
 # CARGA DE INFORMACIÓN DEL NEGOCIO
 # ─────────────────────────────────────────
@@ -237,6 +282,15 @@ REGLAS IMPORTANTES:
 - Si hay algún producto que no está en el inventario, no lo agregues al pedido
 - El domicilio solo aplica dentro de la zona de cobertura del negocio
 - Cuando el cliente diga que ya envió el comprobante, responde amablemente que lo revisarán pronto
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MOSTRAR FOTOS DE PRODUCTOS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Si el cliente pide ver una foto o el diseño de un producto específico que está en el
+inventario, responde brevemente confirmando que se la vas a enviar, y agrega al FINAL
+de tu respuesta, en una línea separada, EXACTAMENTE esto:
+FOTO_SOLICITADA|[Nombre exacto del producto]|[Talla o "N/A" si no aplica]
+
 """
     }
 
@@ -350,6 +404,27 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
                     logger.info(f"Pedido confirmado — notificación enviada al admin")
                 except Exception as e:
                     logger.error(f"Error procesando pedido confirmado: {e}")
+            else:
+                respuesta_limpia.append(linea)
+        respuesta_texto = "\n".join(respuesta_limpia).strip()
+        
+    if "FOTO_SOLICITADA|" in respuesta_texto:
+        lineas = respuesta_texto.split("\n")
+        respuesta_limpia = []
+        for linea in lineas:
+            if "FOTO_SOLICITADA|" in linea:
+                try:
+                    partes = linea.replace("FOTO_SOLICITADA|", "").split("|")
+                    producto = partes[0].strip()
+                    talla = partes[1].strip() if len(partes) > 1 and partes[1].strip() != "N/A" else None
+                    config = obtener_config_negocio(phone_number_id)
+                    foto_url = buscar_foto_producto(config["sheet_id"], producto, talla)
+                    if foto_url:
+                        enviar_imagen_whatsapp(identificador, phone_number_id, foto_url, caption=producto)
+                    else:
+                        logger.info(f"No se encontró foto para {producto} / {talla}")
+                except Exception as e:
+                    logger.error(f"Error procesando solicitud de foto: {e}")
             else:
                 respuesta_limpia.append(linea)
         respuesta_texto = "\n".join(respuesta_limpia).strip()
