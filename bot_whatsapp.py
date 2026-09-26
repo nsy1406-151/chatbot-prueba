@@ -301,6 +301,14 @@ inventario, responde brevemente confirmando que se la vas a enviar, y agrega al 
 de tu respuesta, en una línea separada, EXACTAMENTE esto:
 FOTO_SOLICITADA|[Nombre exacto del producto]|[Talla o "N/A" si no aplica]
 
+IMPORTANTE:
+- NUNCA uses sintaxis markdown de imagen como ![texto](archivo.png) en tu respuesta.
+- NUNCA menciones el nombre del archivo de la imagen (por ejemplo "no-varix-firme-20-30.png").
+- NUNCA describas cómo se ve la foto ni la "muestres" en el texto — el sistema se encarga
+  de enviar la imagen real por separado, tú solo debes confirmar con palabras que la
+  vas a enviar (ejemplo: "Claro, aquí tienes la foto de X:") y dejar la línea
+  FOTO_SOLICITADA al final.
+
 """
     }
 
