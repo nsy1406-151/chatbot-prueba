@@ -387,14 +387,16 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
 
     # ── Detectar solicitud de atención humana ──
     if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
-        respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
-        mensaje_admin = (
-            f"🙋 *Atención humana solicitada*\n\n"
-            f"📱 Cliente: {cliente_display}\n\n"
-            f"_El cliente quiere hablar con una persona del equipo._"
-        )
-        notificar_admin_texto(mensaje_admin, phone_number_id)
-        logger.info(f"Atención humana solicitada por {identificador}")
+    respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
+    pausados.add(identificador)   # 👈 pausa automática
+    mensaje_admin = (
+        f"🙋 *Atención humana solicitada*\n\n"
+        f"📱 Cliente: {cliente_display}\n\n"
+        f"_El cliente quiere hablar con una persona del equipo. "
+        f"El bot se pausó automáticamente para este chat — usa 'activar {cliente_display}' para reanudarlo._"
+    )
+    notificar_admin_texto(mensaje_admin, phone_number_id)
+    logger.info(f"Atención humana solicitada por {identificador} — chat pausado automáticamente")
 
     # ── Detectar pedido confirmado ──
     if "PEDIDO_CONFIRMADO|" in respuesta_texto:
