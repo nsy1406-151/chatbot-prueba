@@ -836,5 +836,9 @@ def instagram_callback():
     )
     return html
 
+@app.route('/fotos/<negocio>/<nombre_archivo>')
+def servir_foto(negocio, nombre_archivo):
+    return send_from_directory(f'fotos/{negocio}', nombre_archivo)
+
 if __name__ == "__main__":
     app.run(port=5000)
