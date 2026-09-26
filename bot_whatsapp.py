@@ -156,11 +156,21 @@ def buscar_foto_producto(sheet_id, producto, talla=None):
         hoja = gc.open_by_key(sheet_id).sheet1
         datos = hoja.get_all_records()
 
+        producto_norm = producto.strip().lower()
+
         for item in datos:
-            coincide_producto = item.get("Producto", "").strip().lower() == producto.strip().lower()
-            coincide_talla = talla is None or str(item.get("Talla", "")).strip().lower() == talla.strip().lower()
+            producto_fila = item.get("Producto", "").strip().lower()
+            coincide_producto = producto_norm in producto_fila or producto_fila in producto_norm
+
+            if talla:
+                coincide_talla = talla.strip().lower() in str(item.get("Talla", "")).strip().lower()
+            else:
+                coincide_talla = True
+
             if coincide_producto and coincide_talla:
-                return item.get("Foto") or None
+                foto = item.get("Foto")
+                if foto:
+                    return foto
         return None
     except Exception as e:
         logger.error(f"Error buscando foto: {e}")
