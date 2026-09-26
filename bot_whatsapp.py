@@ -46,7 +46,7 @@ MAX_MENSAJES = 20
 # WhatsApp AL QUE le escribió el cliente (no el número del cliente).
 NEGOCIOS_CONFIG = {
     "1290940880772557": {  # Urbana Style (número de pruebas actual)
-        "archivo": "negocios/urbana_style.txt",
+        "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID"),
     },
     # "OTRO_PHONE_NUMBER_ID_AQUI": {
