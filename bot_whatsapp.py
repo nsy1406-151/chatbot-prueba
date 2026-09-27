@@ -77,8 +77,24 @@ NEGOCIO_DEFAULT = {
 conversaciones = {}
 pausados = set()
 bot_activo = True
-mensajes_procesados = set()
 MAX_MENSAJES_PROCESADOS = 500
+# OrderedDict recuerda el orden en que entraron los IDs, así cuando
+# se llena sacamos el MÁS VIEJO (un set sacaba uno al azar).
+from collections import OrderedDict
+mensajes_procesados = OrderedDict()
+
+def ya_procesado(mensaje_id):
+    """True si ya vimos este mensaje (Meta lo está reintentando).
+    Si es nuevo, lo registra y devuelve False."""
+    if not mensaje_id:
+        return False
+    if mensaje_id in mensajes_procesados:
+        return True
+    mensajes_procesados[mensaje_id] = True
+    if len(mensajes_procesados) > MAX_MENSAJES_PROCESADOS:
+        mensajes_procesados.popitem(last=False)
+    return False
+
 
 # Relación username de WhatsApp ↔ identificador real (número o BSUID).
 # Permite usar el username directamente en comandos de admin
@@ -638,6 +654,9 @@ def whatsapp_meta_reply():
         phone_number_id = entrada["metadata"]["phone_number_id"]
 
         mensaje_evento = mensajes[0]
+        if ya_procesado(mensaje_evento.get("id")):
+            logger.info(f"Mensaje duplicado ignorado: {mensaje_evento.get('id')}")
+            return "OK", 200
 
         # Soporta tanto números de teléfono normales ("from") como
         # identificadores BSUID de usuarios con username ("from_user_id")
@@ -753,22 +772,8 @@ def instagram_reply():
 
         # Ignorar mensajes duplicados (Meta reintenta si tarda la respuesta)
         mid = evento["message"].get("mid")
-        if mid:
-            if mid in mensajes_procesados:
-                logger.info(f"Mensaje duplicado ignorado: {mid}")
-                return "OK", 200
-            mensajes_procesados.add(mid)
-            if len(mensajes_procesados) > MAX_MENSAJES_PROCESADOS:
-                mensajes_procesados.pop()
-
-        mensaje_usuario = evento["message"].get("text")
-        if not mensaje_usuario:
-            # Es un mensaje real (imagen, sticker, etc.) pero sin texto —
-            # aquí sí responde, una sola vez, porque es un mensaje nuevo.
-            enviar_mensaje_instagram(
-                numero,
-                "Por el momento solo puedo responder mensajes de texto. 😊"
-            )
+        if ya_procesado(mid):
+            logger.info(f"Mensaje duplicado ignorado: {mid}")
             return "OK", 200
 
         mensaje_usuario = evento["message"].get("text")
