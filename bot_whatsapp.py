@@ -227,7 +227,7 @@ def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption="
         payload["recipient"] = numero_destino
     else:
         payload["to"] = numero_destino
-    response = req.post(url, headers=headers, json=payload)
+    response = req.post(url, headers=headers, json=payload, timeout=20)
     logger.info(f"Meta API (imagen) response: {response.status_code}")
 # ─────────────────────────────────────────
 # CARGA DE INFORMACIÓN DEL NEGOCIO
@@ -379,7 +379,7 @@ def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
     try:
         url_info = f"https://graph.facebook.com/v19.0/{image_id}"
         headers = {"Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}"}
-        response = req.get(url_info, headers=headers)
+        response = req.get(url_info, headers=headers, timeout=20)
         image_url = response.json().get("url")
 
         if not image_url:
@@ -742,7 +742,7 @@ def enviar_mensaje_whatsapp(numero_destino, texto, phone_number_id):
     else:
         payload["to"] = numero_destino
 
-    response = req.post(url, headers=headers, json=payload)
+    response = req.post(url, headers=headers, json=payload, timeout=20)
     logger.info(f"Meta API response: {response.status_code} - {response.text}")
 
 # ─────────────────────────────────────────
@@ -839,7 +839,7 @@ def enviar_imagen_instagram(destinatario_id, image_url):
             }
         }
     }
-    response = req.post(url, headers=headers, json=payload)
+    response = req.post(url, headers=headers, json=payload, timeout=20)
     logger.info(f"Instagram API (imagen) response: {response.status_code} - {response.text}")
 
 def reenviar_imagen_admin(image_url, numero_cliente, phone_number_id):
@@ -869,7 +869,7 @@ def enviar_mensaje_instagram(destinatario_id, texto):
         "recipient": {"id": destinatario_id},
         "message": {"text": texto}
     }
-    response = req.post(url, headers=headers, json=payload)
+    response = req.post(url, headers=headers, json=payload, timeout=20)
     logger.info(f"Instagram API response: {response.status_code}")
 
 IG_LOGIN_APP_ID = os.getenv("IG_LOGIN_APP_ID")
