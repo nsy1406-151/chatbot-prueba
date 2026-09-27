@@ -56,7 +56,7 @@ MAX_MENSAJES = 20
 # La clave es el "phone_number_id" de Meta — el ID interno del número de
 # WhatsApp AL QUE le escribió el cliente (no el número del cliente).
 NEGOCIOS_CONFIG = {
-    "1290940880772557": {  # Urbana Style (número de pruebas actual)
+    "1290940880772557": {  #SoloMedias para probar imagenes.
         "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID"),
     },
