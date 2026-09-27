@@ -843,18 +843,54 @@ def enviar_imagen_instagram(destinatario_id, image_url):
     logger.info(f"Instagram API (imagen) response: {response.status_code} - {response.text}")
 
 def reenviar_imagen_admin(image_url, numero_cliente, phone_number_id):
-    """Reenvía al admin por WhatsApp una imagen que llegó por Instagram
-    (ej. comprobante de pago)."""
+    """Reenvía al admin por WhatsApp una imagen que llegó por Instagram.
+    WhatsApp no puede descargar los links de Instagram, así que nuestro
+    servidor la descarga y se la SUBE directo a WhatsApp."""
     try:
         config = obtener_config_negocio(phone_number_id)
         numero_envio = config.get("notificar_desde", phone_number_id)
-        enviar_imagen_whatsapp(
-            NUMERO_ADMIN,
-            numero_envio,
-            image_url,
-            caption=f"📸 *Comprobante de pago recibido (Instagram)*\n👤 Cliente IG: {numero_cliente}\n\n_Respóndele desde la bandeja de Instagram._"
+        token = os.getenv("WHATSAPP_ACCESS_TOKEN")
+
+        # 1. Descargar la imagen desde Instagram
+        descarga = req.get(image_url, timeout=20)
+        descarga.raise_for_status()
+        tipo = descarga.headers.get("Content-Type", "").split(";")[0]
+        if tipo not in ("image/jpeg", "image/png"):
+            tipo = "image/jpeg"  # WhatsApp solo acepta jpg/png
+        extension = "png" if tipo == "image/png" else "jpg"
+
+        # 2. Subirla a WhatsApp → nos devuelve un ID de media
+        subida = req.post(
+            f"https://graph.facebook.com/v19.0/{numero_envio}/media",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"messaging_product": "whatsapp", "type": tipo},
+            files={"file": (f"comprobante.{extension}", descarga.content, tipo)},
+            timeout=20
         )
-        logger.info(f"Comprobante de IG reenviado al admin desde cliente {numero_cliente}")
+        media_id = subida.json().get("id")
+        if not media_id:
+            logger.error(f"Error subiendo comprobante a WhatsApp: {subida.status_code} - {subida.text}")
+            return
+
+        # 3. Enviarla al admin usando el ID (no el link)
+        envio = req.post(
+            f"https://graph.facebook.com/v19.0/{numero_envio}/messages",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "messaging_product": "whatsapp",
+                "to": NUMERO_ADMIN,
+                "type": "image",
+                "image": {
+                    "id": media_id,
+                    "caption": f"📸 *Comprobante de pago recibido (Instagram)*\n👤 Cliente IG: {numero_cliente}\n\n_Respóndele desde la bandeja de Instagram._"
+                }
+            },
+            timeout=20
+        )
+        logger.info(f"Comprobante de IG reenviado al admin: {envio.status_code} - {envio.text}")
     except Exception as e:
         logger.error(f"Error reenviando comprobante de IG: {e}")
 
