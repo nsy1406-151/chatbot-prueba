@@ -68,7 +68,6 @@ NEGOCIOS_CONFIG = {
         # al admin salen desde este número de WhatsApp del negocio:
         "notificar_desde": "1290940880772557",
     },
-    },
     # "OTRO_PHONE_NUMBER_ID_AQUI": {
     #     "archivo": "negocios/otro_negocio.txt",
     #     "sheet_id": "otro_sheet_id_de_google",
