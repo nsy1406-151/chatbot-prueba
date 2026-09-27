@@ -13,6 +13,8 @@ import os
 import requests as req
 import logging
 import json
+import hmac
+import hashlib
 
 # ─────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
@@ -25,6 +27,15 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 app = Flask(__name__)
 
+def firma_valida(app_secret):
+    """Verifica que el webhook venga realmente de Meta.
+    Meta firma cada POST con tu App Secret; si alguien más manda
+    una petición falsa, no puede generar esta firma."""
+    firma = request.headers.get("X-Hub-Signature-256", "")
+    if not app_secret or not firma.startswith("sha256="):
+        return False
+    esperado = hmac.new(app_secret.encode(), request.get_data(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(firma[7:], esperado)
 
 
 # ─────────────────────────────────────────
@@ -612,6 +623,9 @@ def eliminar_datos():
 
 @app.route("/whatsapp_meta", methods=["POST"])
 def whatsapp_meta_reply():
+    if not firma_valida(os.getenv("META_APP_SECRET")):
+        logger.warning("Webhook de WhatsApp con firma inválida — ignorado")
+        return "Firma inválida", 403
     datos = request.get_json()
 
     try:
@@ -717,6 +731,9 @@ def verificar_webhook_instagram():
 
 @app.route("/instagram", methods=["POST"])
 def instagram_reply():
+    if not firma_valida(IG_LOGIN_APP_SECRET):
+        logger.warning("Webhook de Instagram con firma inválida — ignorado")
+        return "Firma inválida", 403
     datos = request.get_json()
 
     try:
