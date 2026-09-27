@@ -60,6 +60,10 @@ NEGOCIOS_CONFIG = {
         "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID"),
     },
+    "17841443710781118": {  # Instagram @chatbots.co
+        "archivo": "negocios/solo_medias.txt",
+        "sheet_id": os.getenv("SHEET_ID"),
+    },
     # "OTRO_PHONE_NUMBER_ID_AQUI": {
     #     "archivo": "negocios/otro_negocio.txt",
     #     "sheet_id": "otro_sheet_id_de_google",
