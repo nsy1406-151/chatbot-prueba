@@ -60,9 +60,14 @@ NEGOCIOS_CONFIG = {
         "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID"),
     },
-    "17841443710781118": {  # Instagram @chatbots.co
+        "17841443710781118": {  # Instagram @chatbots.co
         "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID"),
+        "canal": "instagram",
+        # Instagram no puede mandarte WhatsApps, así que los avisos
+        # al admin salen desde este número de WhatsApp del negocio:
+        "notificar_desde": "1290940880772557",
+    },
     },
     # "OTRO_PHONE_NUMBER_ID_AQUI": {
     #     "archivo": "negocios/otro_negocio.txt",
@@ -350,7 +355,9 @@ def notificar_admin_texto(mensaje, phone_number_id):
     """Envía mensaje de texto al admin por Meta API, desde el mismo número
     de negocio donde ocurrió el evento."""
     try:
-        enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje, phone_number_id)
+        config = obtener_config_negocio(phone_number_id)
+        numero_envio = config.get("notificar_desde", phone_number_id)
+        enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje, numero_envio)
         logger.info("Notificación texto enviada al admin por Meta API")
     except Exception as e:
         logger.error(f"Error notificando admin por Meta: {e}")
@@ -471,7 +478,10 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
                     config = obtener_config_negocio(phone_number_id)
                     foto_url = buscar_foto_producto(config["sheet_id"], producto, talla)
                     if foto_url:
-                        enviar_imagen_whatsapp(identificador, phone_number_id, foto_url, caption=producto)
+                        if config.get("canal") == "instagram":
+                            enviar_imagen_instagram(identificador, foto_url)
+                        else:
+                            enviar_imagen_whatsapp(identificador, phone_number_id, foto_url, caption=producto)
                     else:
                         logger.info(f"No se encontró foto para {producto} / {talla}")
                 except Exception as e:
@@ -782,12 +792,21 @@ def instagram_reply():
 
         mensaje_usuario = evento["message"].get("text")
         if not mensaje_usuario:
-            # Es un mensaje real (imagen, sticker, etc.) pero sin texto —
-            # aquí sí responde, una sola vez, porque es un mensaje nuevo.
-            enviar_mensaje_instagram(
-                numero,
-                "Por el momento solo puedo responder mensajes de texto. 😊"
-            )
+            # Mensaje sin texto: si trae una imagen, la tratamos como
+            # comprobante de pago (igual que en WhatsApp).
+            adjuntos = evento["message"].get("attachments", [])
+            imagen = next((a for a in adjuntos if a.get("type") == "image"), None)
+            if imagen:
+                reenviar_imagen_admin(imagen["payload"]["url"], numero, INSTAGRAM_ACCOUNT_ID)
+                enviar_mensaje_instagram(
+                    numero,
+                    "✅ ¡Recibimos tu comprobante de pago! Lo verificaremos y coordinaremos tu pedido pronto. ¡Gracias! 🙏"
+                )
+            else:
+                enviar_mensaje_instagram(
+                    numero,
+                    "Por el momento solo puedo responder mensajes de texto e imágenes. 😊"
+                )
             return "OK", 200
 
     except (KeyError, IndexError) as e:
@@ -803,6 +822,42 @@ def instagram_reply():
         enviar_mensaje_instagram(numero, respuesta_texto)
 
     return "OK", 200
+
+def enviar_imagen_instagram(destinatario_id, image_url):
+    """Envía una imagen por Instagram DM. IG no acepta caption en
+    imágenes, por eso el texto del bot va como mensaje aparte."""
+    url = f"https://graph.instagram.com/v21.0/{INSTAGRAM_ACCOUNT_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('INSTAGRAM_ACCESS_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "recipient": {"id": destinatario_id},
+        "message": {
+            "attachment": {
+                "type": "image",
+                "payload": {"url": image_url}
+            }
+        }
+    }
+    response = req.post(url, headers=headers, json=payload)
+    logger.info(f"Instagram API (imagen) response: {response.status_code} - {response.text}")
+
+def reenviar_imagen_admin(image_url, numero_cliente, phone_number_id):
+    """Reenvía al admin por WhatsApp una imagen que llegó por Instagram
+    (ej. comprobante de pago)."""
+    try:
+        config = obtener_config_negocio(phone_number_id)
+        numero_envio = config.get("notificar_desde", phone_number_id)
+        enviar_imagen_whatsapp(
+            NUMERO_ADMIN,
+            numero_envio,
+            image_url,
+            caption=f"📸 *Comprobante de pago recibido (Instagram)*\n👤 Cliente IG: {numero_cliente}\n\n_Respóndele desde la bandeja de Instagram._"
+        )
+        logger.info(f"Comprobante de IG reenviado al admin desde cliente {numero_cliente}")
+    except Exception as e:
+        logger.error(f"Error reenviando comprobante de IG: {e}")
 
 def enviar_mensaje_instagram(destinatario_id, texto):
     """Envía un mensaje de texto vía Instagram API (con Instagram Login)."""
