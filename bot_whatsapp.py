@@ -60,7 +60,7 @@ NEGOCIOS_CONFIG = {
         "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID"),
     },
-        "17841443710781118": {  # Instagram @chatbots.co
+    "17841443710781118": {  # Instagram @chatbots.co
         "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID"),
         "canal": "instagram",
