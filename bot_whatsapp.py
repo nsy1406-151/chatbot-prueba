@@ -15,6 +15,9 @@ import logging
 import json
 import hmac
 import hashlib
+from datetime import datetime
+from collections import Counter
+import time
 
 # ─────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
@@ -229,6 +232,34 @@ def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption="
         payload["to"] = numero_destino
     response = req.post(url, headers=headers, json=payload, timeout=20)
     logger.info(f"Meta API (imagen) response: {response.status_code}")
+
+def obtener_hoja_logs(sheet_id):
+    """Obtiene (o crea si no existe) la pestaña 'Logs' del Google Sheet del negocio."""
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+    creds = Credentials.from_service_account_info(creds_json, scopes=scope)
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(sheet_id)
+    try:
+        hoja = sh.worksheet("Logs")
+    except gspread.exceptions.WorksheetNotFound:
+        hoja = sh.add_worksheet(title="Logs", rows=1000, cols=5)
+        hoja.append_row(["Fecha", "Producto", "TipoEvento", "ClienteID", "Negocio"])
+    return hoja
+
+def registrar_evento(sheet_id, producto, tipo_evento, cliente_id, negocio_nombre=""):
+    """Agrega una fila de log a la hoja 'Logs'. No guarda el texto del mensaje, solo el evento."""
+    if not sheet_id or not producto:
+        return
+    try:
+        hoja = obtener_hoja_logs(sheet_id)
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        hoja.append_row([fecha, producto.strip(), tipo_evento, str(cliente_id), negocio_nombre])
+    except Exception as e:
+        logger.error(f"Error registrando evento de estadísticas: {e}")
 # ─────────────────────────────────────────
 # CARGA DE INFORMACIÓN DEL NEGOCIO
 # ─────────────────────────────────────────
@@ -344,6 +375,18 @@ IMPORTANTE:
   vas a enviar (ejemplo: "Claro, aquí tienes la foto de X:") y dejar la línea
   FOTO_SOLICITADA al final.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REGISTRO DE PRODUCTOS CONSULTADOS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Cada vez que recomiendes, menciones o respondas una pregunta sobre un producto
+específico del inventario (sin importar si el cliente pide ver la foto o no), agrega
+al FINAL de tu respuesta, en una línea separada, EXACTAMENTE esto:
+PRODUCTO_MENCIONADO|[Nombre exacto del producto]
+
+Puedes incluir varias líneas PRODUCTO_MENCIONADO si mencionas más de un producto en
+la misma respuesta. No agregues esta línea en saludos o preguntas generales donde no
+se mencionó ningún producto específico.
+
 """
     }
 
@@ -444,6 +487,11 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
                 try:
                     partes = linea.replace("PEDIDO_CONFIRMADO|", "").split("|")
                     resumen = partes[0].strip() if len(partes) > 0 else "Sin detalle"
+                    config = obtener_config_negocio(phone_number_id)
+                    for producto_pedido in resumen.split(","):
+                        producto_limpio = producto_pedido.strip()
+                        if producto_limpio:
+                            registrar_evento(config["sheet_id"], producto_limpio, "pedido", identificador)
                     entrega = partes[1].strip() if len(partes) > 1 else "No especificado"
                     direccion = partes[2].strip() if len(partes) > 2 else "N/A"
                     total = partes[3].strip() if len(partes) > 3 else "No especificado"
@@ -490,6 +538,22 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
         respuesta_texto = "\n".join(respuesta_limpia).strip()
 
     return respuesta_texto
+
+
+    if "PRODUCTO_MENCIONADO|" in respuesta_texto:
+        lineas = respuesta_texto.split("\n")
+        respuesta_limpia = []
+        for linea in lineas:
+            if "PRODUCTO_MENCIONADO|" in linea:
+                try:
+                    producto = linea.replace("PRODUCTO_MENCIONADO|", "").strip()
+                    config = obtener_config_negocio(phone_number_id)
+                    registrar_evento(config["sheet_id"], producto, "consulta", identificador)
+                except Exception as e:
+                    logger.error(f"Error registrando producto mencionado: {e}")
+            else:
+                respuesta_limpia.append(linea)
+        respuesta_texto = "\n".join(respuesta_limpia).strip()
 
 # ─────────────────────────────────────────
 # FUNCIÓN CENTRAL: procesa cualquier mensaje
@@ -745,6 +809,68 @@ def enviar_mensaje_whatsapp(numero_destino, texto, phone_number_id):
     response = req.post(url, headers=headers, json=payload, timeout=20)
     logger.info(f"Meta API response: {response.status_code} - {response.text}")
 
+def generar_resumen_mensual(sheet_id, negocio_nombre="Negocio"):
+    """Genera un texto de resumen mensual a partir de la hoja 'Logs'."""
+    try:
+        hoja = obtener_hoja_logs(sheet_id)
+        filas = hoja.get_all_records()
+    except Exception as e:
+        logger.error(f"Error leyendo logs para resumen: {e}")
+        return None
+
+    ahora = datetime.now()
+    mes_actual = ahora.strftime("%Y-%m")
+
+    consultas = Counter()
+    pedidos = Counter()
+
+    for fila in filas:
+        fecha = str(fila.get("Fecha", ""))
+        if not fecha.startswith(mes_actual):
+            continue
+        producto = str(fila.get("Producto", "")).strip()
+        tipo = str(fila.get("TipoEvento", "")).strip().lower()
+        if not producto:
+            continue
+        if tipo == "consulta":
+            consultas[producto] += 1
+        elif tipo == "pedido":
+            pedidos[producto] += 1
+
+    if not consultas and not pedidos:
+        return f"📊 *Resumen de {negocio_nombre} — {ahora.strftime('%B %Y')}*\n\nNo hubo actividad registrada este mes."
+
+    top_vendido = pedidos.most_common(3)
+    top_preguntado = consultas.most_common(3)
+
+    interes_sin_venta = [
+        (producto, cantidad) for producto, cantidad in consultas.most_common()
+        if cantidad >= 3 and pedidos.get(producto, 0) == 0
+    ]
+
+    mensaje = f"📊 *Resumen de {negocio_nombre} — {ahora.strftime('%B %Y')}*\n\n"
+
+    if top_vendido:
+        mensaje += "🏆 *Más vendidos:*\n"
+        for producto, cantidad in top_vendido:
+            mensaje += f"- {producto}: {cantidad} pedido(s)\n"
+        mensaje += "\n"
+
+    if top_preguntado:
+        mensaje += "💬 *Más consultados:*\n"
+        for producto, cantidad in top_preguntado:
+            mensaje += f"- {producto}: {cantidad} consulta(s)\n"
+        mensaje += "\n"
+
+    if interes_sin_venta:
+        mensaje += "⚠️ *Interés sin ventas (revisar precio, talla o disponibilidad):*\n"
+        for producto, cantidad in interes_sin_venta[:3]:
+            mensaje += f"- {producto}: {cantidad} consultas, 0 pedidos\n"
+        mensaje += "\n"
+
+    mensaje += "_Resumen generado automáticamente a partir de las estadísticas del mes._"
+    return mensaje
+
 # ─────────────────────────────────────────
 # INSTAGRAM VÍA META API (oficial)
 # ─────────────────────────────────────────
@@ -975,6 +1101,26 @@ def instagram_callback():
 @app.route('/fotos/<negocio>/<nombre_archivo>')
 def servir_foto(negocio, nombre_archivo):
     return send_from_directory(f'fotos/{negocio}', nombre_archivo)
+
+
+REPORTE_SECRET = os.getenv("REPORTE_SECRET")
+
+@app.route("/reporte_mensual", methods=["POST"])
+def reporte_mensual():
+    clave = request.headers.get("X-Reporte-Key", "")
+    if clave != REPORTE_SECRET:
+        return "No autorizado", 401
+
+    negocios_procesados = []
+    for phone_number_id, config in NEGOCIOS_CONFIG.items():
+        nombre_negocio = config.get("archivo", "negocio").split("/")[-1].replace(".txt", "")
+        resumen = generar_resumen_mensual(config["sheet_id"], nombre_negocio)
+        if resumen:
+            enviar_mensaje_whatsapp(NUMERO_ADMIN, resumen, phone_number_id)
+            negocios_procesados.append(nombre_negocio)
+        time.sleep(1)
+
+    return {"status": "ok", "negocios_procesados": negocios_procesados}, 200
 
 if __name__ == "__main__":
     app.run(port=5000)
