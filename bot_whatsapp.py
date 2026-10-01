@@ -1,10 +1,4 @@
 from flask import Flask, request, send_from_directory
-
-# ── Twilio: dejado comentado, se reactivará cuando se implemente
-#    el modelo Tech Provider / ISV para nuevos clientes ──
-# from twilio.twiml.messaging_response import MessagingResponse
-# from twilio.rest import Client as TwilioClient
-
 import re
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -49,11 +43,6 @@ def firma_valida(app_secret):
 NUMERO_ADMIN = os.getenv("NUMERO_ADMIN", "573152251406")
 VERIFY_TOKEN_META = os.getenv("VERIFY_TOKEN_META", "botdemo2026")
 MAX_MENSAJES = 20
-
-# ── Variables de Twilio: comentadas junto con el resto del código Twilio ──
-# TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-# TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-# TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
 
 # ─────────────────────────────────────────
 # CONFIGURACIÓN DE NEGOCIOS (multi-cliente)
@@ -470,19 +459,6 @@ def notificar_admin_texto(mensaje, phone_number_id):
     except Exception as e:
         logger.error(f"Error notificando admin por Meta: {e}")
 
-    # ── Respaldo por Twilio: comentado, se reactivará junto con el resto
-    #    del código Twilio cuando se implemente el modelo Tech Provider/ISV ──
-    # try:
-    #     twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    #     twilio_client.messages.create(
-    #         from_=TWILIO_WHATSAPP_NUMBER,
-    #         to=f"whatsapp:+{NUMERO_ADMIN}",
-    #         body=mensaje
-    #     )
-    #     logger.info("Notificación texto enviada al admin por Twilio")
-    # except Exception as e:
-    #     logger.error(f"Error notificando admin por Twilio: {e}")
-
 def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
     """Reenvía imagen (comprobante de pago) al admin vía Meta API."""
     try:
@@ -733,30 +709,6 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
 @app.route("/", methods=["GET"])
 def home():
     return "Bot activo", 200
-
-# ─────────────────────────────────────────
-# WHATSAPP VÍA TWILIO (sandbox/producción)
-# ── Comentado: ya no se usa mientras el bot corre 100% sobre la Cloud API
-#    de Meta. Se reactivará cuando se implemente el modelo Tech Provider/ISV
-#    de Twilio para nuevos clientes. ──
-# ─────────────────────────────────────────
-# @app.route("/whatsapp", methods=["POST"])
-# def whatsapp_reply():
-#     numero = request.form.get("From")
-#     mensaje_usuario = request.form.get("Body")
-#
-#     if not numero or not mensaje_usuario:
-#         return str(MessagingResponse())
-#
-#     logger.info(f"Twilio - mensaje de {numero}: {mensaje_usuario[:50]}")
-#
-#     es_admin = (numero == f"whatsapp:+{NUMERO_ADMIN}")
-#     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, None)
-#
-#     resp = MessagingResponse()
-#     if respuesta_texto:
-#         resp.message(respuesta_texto)
-#     return str(resp)
 
 # ─────────────────────────────────────────
 # WHATSAPP VÍA META API (oficial)
