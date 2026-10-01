@@ -1111,12 +1111,24 @@ def reporte_mensual():
     if clave != REPORTE_SECRET:
         return "No autorizado", 401
 
-    negocios_procesados = []
+    # Agrupamos por sheet_id para no mandar el mismo resumen dos veces
+    # cuando un negocio tiene varias entradas (ej. WhatsApp + Instagram).
+    negocios_vistos = {}
     for phone_number_id, config in NEGOCIOS_CONFIG.items():
+        sheet_id = config.get("sheet_id")
+        if not sheet_id or sheet_id in negocios_vistos:
+            continue
         nombre_negocio = config.get("archivo", "negocio").split("/")[-1].replace(".txt", "")
-        resumen = generar_resumen_mensual(config["sheet_id"], nombre_negocio)
+        # Si el canal no puede recibir mensajes de admin directamente (ej. Instagram),
+        # usamos "notificar_desde" para mandar el resumen por WhatsApp en su lugar.
+        phone_number_id_envio = config.get("notificar_desde", phone_number_id)
+        negocios_vistos[sheet_id] = (nombre_negocio, phone_number_id_envio)
+
+    negocios_procesados = []
+    for sheet_id, (nombre_negocio, phone_number_id_envio) in negocios_vistos.items():
+        resumen = generar_resumen_mensual(sheet_id, nombre_negocio)
         if resumen:
-            enviar_mensaje_whatsapp(NUMERO_ADMIN, resumen, phone_number_id)
+            enviar_mensaje_whatsapp(NUMERO_ADMIN, resumen, phone_number_id_envio)
             negocios_procesados.append(nombre_negocio)
         time.sleep(1)
 
