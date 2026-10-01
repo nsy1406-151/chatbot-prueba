@@ -18,6 +18,7 @@ import hashlib
 from datetime import datetime
 from collections import Counter
 import time
+from datetime import timedelta
 
 # ─────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
@@ -260,6 +261,36 @@ def registrar_evento(sheet_id, producto, tipo_evento, cliente_id, negocio_nombre
         hoja.append_row([fecha, producto.strip(), tipo_evento, str(cliente_id), negocio_nombre])
     except Exception as e:
         logger.error(f"Error registrando evento de estadísticas: {e}")
+
+def limpiar_logs_antiguos(sheet_id, meses_a_conservar=2):
+    """Elimina del log las filas más viejas que 'meses_a_conservar' meses."""
+    try:
+        hoja = obtener_hoja_logs(sheet_id)
+        filas = hoja.get_all_records()
+        if not filas:
+            return
+
+        limite = datetime.now() - timedelta(days=30 * meses_a_conservar)
+        filas_a_conservar = []
+        for fila in filas:
+            try:
+                fecha = datetime.strptime(str(fila.get("Fecha", "")), "%Y-%m-%d %H:%M:%S")
+                if fecha >= limite:
+                    filas_a_conservar.append(fila)
+            except ValueError:
+                continue
+
+        hoja.clear()
+        hoja.append_row(["Fecha", "Producto", "TipoEvento", "ClienteID", "Negocio"])
+        for fila in filas_a_conservar:
+            hoja.append_row([
+                fila.get("Fecha", ""), fila.get("Producto", ""),
+                fila.get("TipoEvento", ""), fila.get("ClienteID", ""),
+                fila.get("Negocio", "")
+            ])
+        logger.info(f"Logs limpiados: {len(filas_a_conservar)} filas conservadas")
+    except Exception as e:
+        logger.error(f"Error limpiando logs antiguos: {e}")
 # ─────────────────────────────────────────
 # CARGA DE INFORMACIÓN DEL NEGOCIO
 # ─────────────────────────────────────────
@@ -1130,6 +1161,7 @@ def reporte_mensual():
         if resumen:
             enviar_mensaje_whatsapp(NUMERO_ADMIN, resumen, phone_number_id_envio)
             negocios_procesados.append(nombre_negocio)
+        limpiar_logs_antiguos(sheet_id)   # 👈 nuevo
         time.sleep(1)
 
     return {"status": "ok", "negocios_procesados": negocios_procesados}, 200
