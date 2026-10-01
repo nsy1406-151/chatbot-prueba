@@ -127,11 +127,17 @@ def resolver_identificador(texto):
     real. Si no, lo devuelve tal cual (asumiendo que ya es número o BSUID)."""
     return USERNAME_A_ID.get(texto.lower().strip(), texto.strip())
 
-def formatear_identificador_cliente(identificador):
+def formatear_identificador_cliente(identificador, es_instagram=False):
     """Da un formato legible al identificador del cliente para las
     notificaciones al admin, incluyendo el username si lo tenemos."""
-    numero_limpio = identificador.replace("whatsapp:+", "").replace("whatsapp:", "")
     username = ID_A_USERNAME.get(identificador)
+
+    if es_instagram:
+        if username:
+            return f"@{username} (Instagram)"
+        return f"Instagram ID {identificador} (sin username registrado)"
+
+    numero_limpio = identificador.replace("whatsapp:+", "").replace("whatsapp:", "")
     es_bsuid = len(numero_limpio) > 2 and numero_limpio[2] == "." and numero_limpio[:2].isalpha()
 
     if es_bsuid:
@@ -523,8 +529,9 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
     - Pedidos confirmados
     Retorna la respuesta limpia sin las líneas internas.
     """
-    cliente_display = formatear_identificador_cliente(identificador)
-
+    config = obtener_config_negocio(phone_number_id)
+    es_instagram = config.get("canal") == "instagram"
+    cliente_display = formatear_identificador_cliente(identificador, es_instagram)
     # ── Detectar solicitud de atención humana ──
     if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
         respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
