@@ -5,6 +5,7 @@ from flask import Flask, request, send_from_directory
 # from twilio.twiml.messaging_response import MessagingResponse
 # from twilio.rest import Client as TwilioClient
 
+import re
 from openai import OpenAI
 from dotenv import load_dotenv
 import gspread
