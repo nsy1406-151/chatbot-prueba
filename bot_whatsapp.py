@@ -1102,11 +1102,10 @@ def enviar_mensaje_instagram(destinatario_id, texto):
         "message": {"text": texto}
     }
     response = req.post(url, headers=headers, json=payload, timeout=20)
-    logger.info(f"Instagram API response: {response.status_code}")
-
-IG_LOGIN_APP_ID = os.getenv("IG_LOGIN_APP_ID")
-IG_LOGIN_APP_SECRET = os.getenv("IG_LOGIN_APP_SECRET")
-IG_REDIRECT_URI = "https://chatbot-prueba-0t6r.onrender.com/instagram/callback"
+    if response.status_code != 200:
+        logger.error(f"Instagram API error {response.status_code}: {response.text}")
+    else:
+        logger.info(f"Instagram API response: {response.status_code}")
 
 @app.route("/conectar-instagram")
 def conectar_instagram():
