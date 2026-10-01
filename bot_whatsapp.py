@@ -418,6 +418,12 @@ Puedes incluir varias líneas PRODUCTO_MENCIONADO si mencionas más de un produc
 la misma respuesta. No agregues esta línea en saludos o preguntas generales donde no
 se mencionó ningún producto específico.
 
+Nunca muestres literalmente el texto "PRODUCTO_MENCIONADO" seguido de "(nombre del
+producto)" como ejemplo — siempre reemplázalo por el nombre real del producto del
+que hablaste. Si estás listando TODO el catálogo (el cliente pidió ver todos los
+productos), no agregues una línea PRODUCTO_MENCIONADO por cada uno; solo usa este
+marcador cuando el cliente pregunta por uno o pocos productos específicos.
+
 """
     }
 
@@ -571,15 +577,18 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
     return respuesta_texto
 
 
-    if "PRODUCTO_MENCIONADO|" in respuesta_texto:
+    patron_producto = re.compile(r"PRODUCTO_MENCIONADO\s*\|\s*(.+)", re.IGNORECASE)
+    if patron_producto.search(respuesta_texto):
         lineas = respuesta_texto.split("\n")
         respuesta_limpia = []
         for linea in lineas:
-            if "PRODUCTO_MENCIONADO|" in linea:
+            match = patron_producto.search(linea)
+            if match:
                 try:
-                    producto = linea.replace("PRODUCTO_MENCIONADO|", "").strip()
-                    config = obtener_config_negocio(phone_number_id)
-                    registrar_evento(config["sheet_id"], producto, "consulta", identificador)
+                    producto = match.group(1).strip()
+                    if producto and "nombre del producto" not in producto.lower():
+                        config = obtener_config_negocio(phone_number_id)
+                        registrar_evento(config["sheet_id"], producto, "consulta", identificador)
                 except Exception as e:
                     logger.error(f"Error registrando producto mencionado: {e}")
             else:
