@@ -228,7 +228,7 @@ def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption="
     else:
         payload["to"] = numero_destino
     response = req.post(url, headers=headers, json=payload, timeout=20)
-    logger.info(f"Meta API (imagen) response: {response.status_code}")
+    logger.info(f"Meta API (imagen) response: {response.status_code} - {response.text}")
 
 def obtener_hoja_logs(sheet_id):
     """Obtiene (o crea si no existe) la pestaña 'Logs' del Google Sheet del negocio."""
@@ -489,7 +489,8 @@ def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
                 "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
                 "Content-Type": "application/json"
             },
-            json=payload
+            json=payload,
+            timeout = 20
         )
         logger.info(f"Comprobante reenviado al admin desde cliente {numero_cliente}")
     except Exception as e:
@@ -580,8 +581,6 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
                 respuesta_limpia.append(linea)
         respuesta_texto = "\n".join(respuesta_limpia).strip()
 
-    return respuesta_texto
-
 
     patron_producto = re.compile(r"PRODUCTO_MENCIONADO\s*\|\s*(.+)", re.IGNORECASE)
     if patron_producto.search(respuesta_texto):
@@ -600,6 +599,9 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
             else:
                 respuesta_limpia.append(linea)
         respuesta_texto = "\n".join(respuesta_limpia).strip()
+        
+    return respuesta_texto
+
 
 # ─────────────────────────────────────────
 # FUNCIÓN CENTRAL: procesa cualquier mensaje
