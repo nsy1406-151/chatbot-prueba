@@ -957,14 +957,7 @@ def verificar_webhook_instagram():
 
 @app.route("/instagram", methods=["POST"])
 def instagram_reply():
-    # --- Debug temporal para firma Instagram ---
-    secret = os.getenv("META_APP_SECRET", "")
-    firma_header = request.headers.get("X-Hub-Signature-256", "")
-    body = request.get_data()
-    esperado_debug = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    logger.info(f"IG firma debug: recibida={firma_header[7:15]}... esperada={esperado_debug[:8]}... body_len={len(body)} secret_len={len(secret)} secret_hex={secret.encode().hex()[:16]}...")
-    # --- Fin debug ---
-    if not firma_valida(os.getenv("META_APP_SECRET")):
+    if not firma_valida(os.getenv("IG_LOGIN_APP_SECRET")):
         logger.warning("Webhook de Instagram con firma inválida — ignorado")
         return "Firma inválida", 403
     datos = request.get_json()
