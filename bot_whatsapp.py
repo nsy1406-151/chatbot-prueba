@@ -15,6 +15,52 @@ from collections import Counter
 import time
 from datetime import timedelta
 
+
+# ─────────────────────────────────────────
+# CACHÉ DE GOOGLE SHEETS
+# ─────────────────────────────────────────
+# En vez de llamar a Google en cada mensaje, guardamos los datos en
+# memoria y los refrescamos cada 5 minutos. Así el bot responde más
+# rápido y no pega contra el rate limit de Google (60 req/min).
+_cache_inventario = {}   # {sheet_id: {"datos": [...], "timestamp": float}}
+CACHE_TTL = 300          # segundos (5 minutos)
+
+def _autenticar_sheets():
+    """Crea una conexión autenticada con Google Sheets."""
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+    creds = Credentials.from_service_account_info(creds_json, scopes=scope)
+    return gspread.authorize(creds)
+
+def _leer_datos_sheets(sheet_id):
+    """Lee la hoja 1 del Sheet. Si la leyó hace menos de 5 min,
+    devuelve la copia que ya tiene en memoria (el caché)."""
+    if not sheet_id:
+        return []
+    ahora = time.time()
+    cached = _cache_inventario.get(sheet_id)
+
+    if cached and (ahora - cached["timestamp"]) < CACHE_TTL:
+        return cached["datos"]
+
+    # Caché vacío o expirado → leer de Google
+    try:
+        gc = _autenticar_sheets()
+        hoja = gc.open_by_key(sheet_id).sheet1
+        datos = hoja.get_all_records()
+        _cache_inventario[sheet_id] = {"datos": datos, "timestamp": ahora}
+        logger.info(f"Sheets ({sheet_id[:8]}...): {len(datos)} filas leídas (caché refrescado)")
+        return datos
+    except Exception as e:
+        logger.error(f"Error leyendo Google Sheets ({sheet_id}): {e}")
+        # Si falla pero hay caché viejo, mejor usarlo que quedarse sin nada
+        if cached:
+            logger.info("Usando caché anterior como respaldo")
+            return cached["datos"]
+        return []
 # ─────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
 # ─────────────────────────────────────────
@@ -177,39 +223,24 @@ def obtener_inventario(sheet_id):
 
 
 def buscar_foto_producto(sheet_id, producto, talla=None):
-    """Busca la URL de la foto de un producto (y talla, si aplica) en el inventario."""
-    if not sheet_id:
-        return None
-    try:
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
-        gc = gspread.authorize(creds)
-        hoja = gc.open_by_key(sheet_id).sheet1
-        datos = hoja.get_all_records()
+    """Busca la URL de la foto de un producto en el inventario (desde caché)."""
+    datos = _leer_datos_sheets(sheet_id)
+    producto_norm = producto.strip().lower()
 
-        producto_norm = producto.strip().lower()
+    for item in datos:
+        producto_fila = item.get("Producto", "").strip().lower()
+        coincide_producto = producto_norm in producto_fila or producto_fila in producto_norm
 
-        for item in datos:
-            producto_fila = item.get("Producto", "").strip().lower()
-            coincide_producto = producto_norm in producto_fila or producto_fila in producto_norm
+        if talla:
+            coincide_talla = talla.strip().lower() in str(item.get("Talla", "")).strip().lower()
+        else:
+            coincide_talla = True
 
-            if talla:
-                coincide_talla = talla.strip().lower() in str(item.get("Talla", "")).strip().lower()
-            else:
-                coincide_talla = True
-
-            if coincide_producto and coincide_talla:
-                foto = item.get("Foto")
-                if foto:
-                    return foto
-        return None
-    except Exception as e:
-        logger.error(f"Error buscando foto: {e}")
-        return None
+        if coincide_producto and coincide_talla:
+            foto = item.get("Foto")
+            if foto:
+                return foto
+    return None
 
 def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption=""):
     """Envía una imagen vía Meta WhatsApp API."""
@@ -661,6 +692,12 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
                 "• *borrar todo* — borra todos los historiales\n"
                 "• *ayuda* — muestra este menú\n\n"
                 "_Puedes usar el número, el username (sin @) o el código completo, según lo que te haya mostrado la notificación._"
+                "• *refrescar* — recarga el inventario desde Google Sheets\n"
+            )
+                
+        elif cmd == "refrescar":
+            _cache_inventario.clear()
+            return "🔄 Caché de inventario limpiado. El próximo mensaje leerá datos frescos de Google Sheets."
             )
 
     # ── Verificaciones antes de responder ──
