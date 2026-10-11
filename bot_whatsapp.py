@@ -144,6 +144,45 @@ def ya_procesado(mensaje_id):
     return False
 
 
+# ─────────────────────────────────────────
+# PERSISTENCIA DE ESTADO
+# ─────────────────────────────────────────
+# Guarda conversaciones, pausados y bot_activo en un JSON para que
+# sobrevivan cuando Render reinicia o duerme el servidor.
+ESTADO_ARCHIVO = "estado_bot.json"
+
+def guardar_estado():
+    """Guarda el estado actual del bot en disco."""
+    try:
+        estado = {
+            "conversaciones": conversaciones,
+            "pausados": list(pausados),
+            "bot_activo": bot_activo,
+        }
+        with open(ESTADO_ARCHIVO, "w", encoding="utf-8") as f:
+            json.dump(estado, f, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Error guardando estado: {e}")
+
+def cargar_estado():
+    """Carga el estado del bot desde disco (si existe)."""
+    global bot_activo
+    try:
+        with open(ESTADO_ARCHIVO, "r", encoding="utf-8") as f:
+            estado = json.load(f)
+        conversaciones.update(estado.get("conversaciones", {}))
+        pausados.update(estado.get("pausados", []))
+        bot_activo = estado.get("bot_activo", True)
+        logger.info(f"Estado cargado: {len(conversaciones)} conversaciones, {len(pausados)} pausados")
+    except FileNotFoundError:
+        logger.info("No hay estado previo — arrancando limpio")
+    except Exception as e:
+        logger.error(f"Error cargando estado: {e}")
+
+# Cargar estado al iniciar el servidor
+cargar_estado()    
+
+
 # Relación username de WhatsApp ↔ identificador real (número o BSUID).
 # Permite usar el username directamente en comandos de admin
 # (ej. "pausar julianp1406") en vez del código largo o el número.
@@ -543,7 +582,8 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
     # ── Detectar solicitud de atención humana ──
     if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
         respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
-        pausados.add(identificador)   # 👈 pausa automática
+        pausados.add(identificador)# pausa automática
+        guardar_estado()
         mensaje_admin = (
             f"🙋 *Atención humana solicitada*\n\n"
             f"📱 Cliente: {cliente_display}\n\n"
@@ -646,10 +686,12 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
         if cmd.startswith("pausar "):
             id_pausar = resolver_identificador(mensaje_usuario[7:])
             pausados.add(id_pausar)
+            guardar_estado()
             return f"✅ Bot pausado para {id_pausar}"
         elif cmd.startswith("activar "):
             id_activar = resolver_identificador(mensaje_usuario[8:])
             pausados.discard(id_activar)
+            guardar_estado()
             return f"✅ Bot reactivado para {id_activar}"
         elif cmd == "lista":
             if pausados:
@@ -657,9 +699,11 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
             return "✅ No hay conversaciones pausadas."
         elif cmd == "pausar todo":
             bot_activo = False
+            guardar_estado()
             return "⏸️ Bot pausado para todos los usuarios."
         elif cmd == "activar todo":
             bot_activo = True
+            guardar_estado()
             return "▶️ Bot reactivado para todos los usuarios."
         elif cmd == "estado":
             estado = "✅ Activo" if bot_activo else "⏸️ Pausado globalmente"
@@ -674,10 +718,12 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
             clave_borrar = f"{phone_number_id}:{id_borrar}"
             if clave_borrar in conversaciones:
                 del conversaciones[clave_borrar]
+                guardar_estado()
                 return f"🗑️ Historial borrado para {id_borrar}"
             return f"No encontré conversación activa para {id_borrar}"
         elif cmd == "borrar todo":
             conversaciones.clear()
+            guardar_estado()
             return "🗑️ Todos los historiales borrados."
         elif cmd == "ayuda":
             return (
@@ -735,6 +781,7 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
 
         conversaciones[clave_conversacion].append({"role": "assistant", "content": respuesta_texto})
         logger.info(f"Respuesta generada para {identificador[:8]}... (negocio {phone_number_id})")
+        guardar_estado()
         return respuesta_texto
 
     except Exception as e:
