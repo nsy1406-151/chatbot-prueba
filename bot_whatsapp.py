@@ -15,52 +15,6 @@ from collections import Counter
 import time
 from datetime import timedelta
 
-
-# ─────────────────────────────────────────
-# CACHÉ DE GOOGLE SHEETS
-# ─────────────────────────────────────────
-# En vez de llamar a Google en cada mensaje, guardamos los datos en
-# memoria y los refrescamos cada 5 minutos. Así el bot responde más
-# rápido y no pega contra el rate limit de Google (60 req/min).
-_cache_inventario = {}   # {sheet_id: {"datos": [...], "timestamp": float}}
-CACHE_TTL = 300          # segundos (5 minutos)
-
-def _autenticar_sheets():
-    """Crea una conexión autenticada con Google Sheets."""
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-    creds = Credentials.from_service_account_info(creds_json, scopes=scope)
-    return gspread.authorize(creds)
-
-def _leer_datos_sheets(sheet_id):
-    """Lee la hoja 1 del Sheet. Si la leyó hace menos de 5 min,
-    devuelve la copia que ya tiene en memoria (el caché)."""
-    if not sheet_id:
-        return []
-    ahora = time.time()
-    cached = _cache_inventario.get(sheet_id)
-
-    if cached and (ahora - cached["timestamp"]) < CACHE_TTL:
-        return cached["datos"]
-
-    # Caché vacío o expirado → leer de Google
-    try:
-        gc = _autenticar_sheets()
-        hoja = gc.open_by_key(sheet_id).sheet1
-        datos = hoja.get_all_records()
-        _cache_inventario[sheet_id] = {"datos": datos, "timestamp": ahora}
-        logger.info(f"Sheets ({sheet_id[:8]}...): {len(datos)} filas leídas (caché refrescado)")
-        return datos
-    except Exception as e:
-        logger.error(f"Error leyendo Google Sheets ({sheet_id}): {e}")
-        # Si falla pero hay caché viejo, mejor usarlo que quedarse sin nada
-        if cached:
-            logger.info("Usando caché anterior como respaldo")
-            return cached["datos"]
-        return []
 # ─────────────────────────────────────────
 # CONFIGURACIÓN INICIAL
 # ─────────────────────────────────────────
@@ -143,16 +97,13 @@ def ya_procesado(mensaje_id):
         mensajes_procesados.popitem(last=False)
     return False
 
-
 # ─────────────────────────────────────────
 # PERSISTENCIA DE ESTADO
 # ─────────────────────────────────────────
-# Guarda conversaciones, pausados y bot_activo en un JSON para que
-# sobrevivan cuando Render reinicia o duerme el servidor.
 ESTADO_ARCHIVO = "estado_bot.json"
 
 def guardar_estado():
-    """Guarda el estado actual del bot en disco."""
+    """Guarda conversaciones, pausados y bot_activo en disco."""
     try:
         estado = {
             "conversaciones": conversaciones,
@@ -180,8 +131,7 @@ def cargar_estado():
         logger.error(f"Error cargando estado: {e}")
 
 # Cargar estado al iniciar el servidor
-cargar_estado()    
-
+cargar_estado()
 
 # Relación username de WhatsApp ↔ identificador real (número o BSUID).
 # Permite usar el username directamente en comandos de admin
@@ -262,24 +212,39 @@ def obtener_inventario(sheet_id):
 
 
 def buscar_foto_producto(sheet_id, producto, talla=None):
-    """Busca la URL de la foto de un producto en el inventario (desde caché)."""
-    datos = _leer_datos_sheets(sheet_id)
-    producto_norm = producto.strip().lower()
+    """Busca la URL de la foto de un producto (y talla, si aplica) en el inventario."""
+    if not sheet_id:
+        return None
+    try:
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
+        gc = gspread.authorize(creds)
+        hoja = gc.open_by_key(sheet_id).sheet1
+        datos = hoja.get_all_records()
 
-    for item in datos:
-        producto_fila = item.get("Producto", "").strip().lower()
-        coincide_producto = producto_norm in producto_fila or producto_fila in producto_norm
+        producto_norm = producto.strip().lower()
 
-        if talla:
-            coincide_talla = talla.strip().lower() in str(item.get("Talla", "")).strip().lower()
-        else:
-            coincide_talla = True
+        for item in datos:
+            producto_fila = item.get("Producto", "").strip().lower()
+            coincide_producto = producto_norm in producto_fila or producto_fila in producto_norm
 
-        if coincide_producto and coincide_talla:
-            foto = item.get("Foto")
-            if foto:
-                return foto
-    return None
+            if talla:
+                coincide_talla = talla.strip().lower() in str(item.get("Talla", "")).strip().lower()
+            else:
+                coincide_talla = True
+
+            if coincide_producto and coincide_talla:
+                foto = item.get("Foto")
+                if foto:
+                    return foto
+        return None
+    except Exception as e:
+        logger.error(f"Error buscando foto: {e}")
+        return None
 
 def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption=""):
     """Envía una imagen vía Meta WhatsApp API."""
@@ -298,7 +263,7 @@ def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption="
     else:
         payload["to"] = numero_destino
     response = req.post(url, headers=headers, json=payload, timeout=20)
-    logger.info(f"Meta API (imagen) response: {response.status_code} - {response.text}")
+    logger.info(f"Meta API (imagen) response: {response.status_code}")
 
 def obtener_hoja_logs(sheet_id):
     """Obtiene (o crea si no existe) la pestaña 'Logs' del Google Sheet del negocio."""
@@ -559,8 +524,7 @@ def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
                 "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
                 "Content-Type": "application/json"
             },
-            json=payload,
-            timeout = 20
+            json=payload
         )
         logger.info(f"Comprobante reenviado al admin desde cliente {numero_cliente}")
     except Exception as e:
@@ -582,7 +546,7 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
     # ── Detectar solicitud de atención humana ──
     if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
         respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
-        pausados.add(identificador)# pausa automática
+        pausados.add(identificador)   # 👈 pausa automática
         guardar_estado()
         mensaje_admin = (
             f"🙋 *Atención humana solicitada*\n\n"
@@ -652,7 +616,7 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
                 respuesta_limpia.append(linea)
         respuesta_texto = "\n".join(respuesta_limpia).strip()
 
-
+    # ── Detectar productos mencionados (estadísticas) ──
     patron_producto = re.compile(r"PRODUCTO_MENCIONADO\s*\|\s*(.+)", re.IGNORECASE)
     if patron_producto.search(respuesta_texto):
         lineas = respuesta_texto.split("\n")
@@ -670,9 +634,8 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
             else:
                 respuesta_limpia.append(linea)
         respuesta_texto = "\n".join(respuesta_limpia).strip()
-        
-    return respuesta_texto
 
+    return respuesta_texto
 
 # ─────────────────────────────────────────
 # FUNCIÓN CENTRAL: procesa cualquier mensaje
@@ -738,12 +701,6 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
                 "• *borrar todo* — borra todos los historiales\n"
                 "• *ayuda* — muestra este menú\n\n"
                 "_Puedes usar el número, el username (sin @) o el código completo, según lo que te haya mostrado la notificación._"
-                "• *refrescar* — recarga el inventario desde Google Sheets\n"
-            )
-                
-        elif cmd == "refrescar":
-            _cache_inventario.clear()
-            return "🔄 Caché de inventario limpiado. El próximo mensaje leerá datos frescos de Google Sheets."
             )
 
     # ── Verificaciones antes de responder ──
@@ -983,6 +940,9 @@ def generar_resumen_mensual(sheet_id, negocio_nombre="Negocio"):
 # INSTAGRAM VÍA META API (oficial)
 # ─────────────────────────────────────────
 INSTAGRAM_ACCOUNT_ID = "17841443710781118"  # chatbots.co
+IG_LOGIN_APP_ID = os.getenv("IG_LOGIN_APP_ID", "")
+IG_LOGIN_APP_SECRET = os.getenv("IG_LOGIN_APP_SECRET", "")
+IG_REDIRECT_URI = os.getenv("IG_REDIRECT_URI", "")
 
 @app.route("/instagram", methods=["GET"])
 def verificar_webhook_instagram():
@@ -997,7 +957,7 @@ def verificar_webhook_instagram():
 
 @app.route("/instagram", methods=["POST"])
 def instagram_reply():
-    if not firma_valida(IG_LOGIN_APP_SECRET):
+    if not firma_valida(os.getenv("META_APP_SECRET")):
         logger.warning("Webhook de Instagram con firma inválida — ignorado")
         return "Firma inválida", 403
     datos = request.get_json()
@@ -1010,6 +970,20 @@ def instagram_reply():
 
         evento = mensajeria[0]
         numero = evento["sender"]["id"]
+
+        # Intentar obtener el username de Instagram para este usuario
+        try:
+            ig_token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
+            if ig_token and numero not in ID_A_USERNAME:
+                perfil = req.get(
+                    f"https://graph.instagram.com/v21.0/{numero}",
+                    params={"fields": "username", "access_token": ig_token},
+                    timeout=5,
+                ).json()
+                if "username" in perfil:
+                    registrar_username(numero, perfil["username"])
+        except Exception as e:
+            logger.warning(f"No se pudo obtener username de IG para {numero}: {e}")
 
         # Ignorar cualquier evento que no sea un mensaje real (echos,
         # confirmaciones de entrega/lectura, reacciones, etc.) — responder
@@ -1074,7 +1048,10 @@ def enviar_imagen_instagram(destinatario_id, image_url):
         }
     }
     response = req.post(url, headers=headers, json=payload, timeout=20)
-    logger.info(f"Instagram API (imagen) response: {response.status_code} - {response.text}")
+    if response.status_code != 200:
+        logger.error(f"Instagram API (imagen) error {response.status_code}: {response.text}")
+    else:
+        logger.info(f"Instagram API (imagen) enviada OK")
 
 def reenviar_imagen_admin(image_url, numero_cliente, phone_number_id):
     """Reenvía al admin por WhatsApp una imagen que llegó por Instagram.
@@ -1185,6 +1162,10 @@ def instagram_callback():
     access_token = token_data.get("access_token")
     if not access_token:
         return "Error obteniendo el token: " + str(token_data), 400
+
+    # Log del token para que puedas copiarlo a las variables de entorno en Render
+    logger.info(f"✅ Instagram access token obtenido — agrégalo en Render como INSTAGRAM_ACCESS_TOKEN")
+    logger.info(f"Token: {access_token}")
 
     profile_resp = req.get(
         "https://graph.instagram.com/me",
