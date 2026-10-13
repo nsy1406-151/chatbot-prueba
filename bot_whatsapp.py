@@ -1106,21 +1106,43 @@ def reenviar_imagen_admin(image_url, numero_cliente, phone_number_id):
         logger.error(f"Error reenviando comprobante de IG: {e}")
 
 def enviar_mensaje_instagram(destinatario_id, texto):
-    """Envía un mensaje de texto vía Instagram API (con Instagram Login)."""
+    """Envía un mensaje de texto vía Instagram API (con Instagram Login).
+    Instagram acepta máx. 1000 caracteres por mensaje, así que los textos
+    largos se parten en varios mensajes."""
     url = f"https://graph.instagram.com/v21.0/{INSTAGRAM_ACCOUNT_ID}/messages"
     headers = {
         "Authorization": f"Bearer {os.getenv('INSTAGRAM_ACCESS_TOKEN')}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "recipient": {"id": destinatario_id},
-        "message": {"text": texto}
-    }
-    response = req.post(url, headers=headers, json=payload, timeout=20)
-    if response.status_code != 200:
-        logger.error(f"Instagram API error {response.status_code}: {response.text}")
-    else:
-        logger.info(f"Instagram API response: {response.status_code}")
+
+    # Partir el texto en trozos de máx. 900 caracteres
+    trozos = []
+    actual = ""
+    for linea in texto.split("\n"):
+        while len(linea) > 900:  # línea gigante sin saltos
+            if actual:
+                trozos.append(actual)
+                actual = ""
+            trozos.append(linea[:900])
+            linea = linea[900:]
+        if len(actual) + len(linea) + 1 > 900:
+            trozos.append(actual)
+            actual = linea
+        else:
+            actual = (actual + "\n" + linea) if actual else linea
+    if actual:
+        trozos.append(actual)
+
+    for trozo in trozos:
+        payload = {
+            "recipient": {"id": destinatario_id},
+            "message": {"text": trozo}
+        }
+        response = req.post(url, headers=headers, json=payload, timeout=20)
+        if response.status_code != 200:
+            logger.error(f"Instagram API error {response.status_code}: {response.text}")
+        else:
+            logger.info(f"Instagram API response: {response.status_code}")
 
 @app.route("/conectar-instagram")
 def conectar_instagram():
