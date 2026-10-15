@@ -352,25 +352,51 @@ def buscar_foto_producto(sheet_id, producto, talla=None):
     try:
         datos = leer_hoja_inventario(sheet_id)
 
-        producto_norm = producto.strip().lower()
+        # Comparamos por palabras (sin tildes ni mayúsculas) en vez de exigir
+        # que un nombre esté completo dentro del otro: así "Medias No-Varix
+        # firme 20-30" encuentra "No-Varix Firme 20-30 mmHg".
+        buscadas = {_raiz(p) for p in _normalizar(producto)
+                    if p not in PALABRAS_VACIAS and (len(p) >= 3 or p.isdigit())}
+        talla_norm = " ".join(_normalizar(talla)) if talla else ""
 
+        mejor, mejor_puntos = None, 0
         for item in datos:
-            producto_fila = item.get("Producto", "").strip().lower()
-            coincide_producto = producto_norm in producto_fila or producto_fila in producto_norm
+            foto = str(item.get("Foto") or "").strip()
+            if not foto:
+                continue
+            tokens = {_raiz(t) for t in _normalizar(item.get("Producto", ""))}
+            if not tokens or not buscadas:
+                continue
+            coinciden = len(buscadas & tokens)
+            # Debe coincidir al menos la mitad de las palabras del producto pedido
+            if coinciden == 0 or coinciden < len(buscadas) / 2:
+                continue
+            puntos = coinciden / len(buscadas | tokens)
+            if talla_norm:
+                talla_fila = " ".join(_normalizar(item.get("Talla", "")))
+                if talla_norm in talla_fila or talla_norm in " ".join(_normalizar(item.get("Producto", ""))):
+                    puntos += 1  # prioriza la talla pedida, pero no la exige
+            if puntos > mejor_puntos:
+                mejor, mejor_puntos = foto, puntos
 
-            if talla:
-                coincide_talla = talla.strip().lower() in str(item.get("Talla", "")).strip().lower()
-            else:
-                coincide_talla = True
-
-            if coincide_producto and coincide_talla:
-                foto = item.get("Foto")
-                if foto:
-                    return foto
-        return None
+        if not mejor:
+            logger.warning(f"Foto no encontrada en el Sheet para '{producto}' / talla '{talla}'")
+        return mejor
     except Exception as e:
         logger.error(f"Error buscando foto: {e}")
         return None
+
+
+BASE_URL = os.getenv("BASE_URL", "https://chatbot-prueba-0t6r.onrender.com")
+
+def url_publica_foto(foto, phone_number_id):
+    """Si en el Sheet solo está el nombre del archivo (ej. 'no-varix.png'),
+    lo convierte en el link público servido por /fotos/<negocio>/<archivo>."""
+    if foto.startswith("http://") or foto.startswith("https://"):
+        return foto
+    config = obtener_config_negocio(phone_number_id)
+    carpeta = os.path.splitext(os.path.basename(config.get("archivo", "")))[0]  # negocios/solo_medias.txt -> solo_medias
+    return f"{BASE_URL}/fotos/{carpeta}/{foto.lstrip('/')}"
 
 def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption=""):
     """Envía una imagen vía Meta WhatsApp API."""
@@ -389,7 +415,10 @@ def enviar_imagen_whatsapp(numero_destino, phone_number_id, image_url, caption="
     else:
         payload["to"] = numero_destino
     response = req.post(url, headers=headers, json=payload, timeout=20)
-    logger.info(f"Meta API (imagen) response: {response.status_code}")
+    if response.status_code == 200:
+        logger.info(f"Meta API (imagen) enviada OK: {image_url}")
+    else:
+        logger.error(f"Meta API (imagen) error {response.status_code}: {response.text} | url={image_url}")
 
 def obtener_hoja_logs(sheet_id):
     """Obtiene (o crea si no existe) la pestaña 'Logs' del Google Sheet del negocio."""
@@ -729,7 +758,9 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
                     talla = partes[1].strip() if len(partes) > 1 and partes[1].strip() != "N/A" else None
                     config = obtener_config_negocio(phone_number_id)
                     foto_url = buscar_foto_producto(config["sheet_id"], producto, talla)
+                    logger.info(f"FOTO_SOLICITADA: '{producto}' / '{talla}' -> {foto_url}")
                     if foto_url:
+                        foto_url = url_publica_foto(foto_url, phone_number_id)
                         if config.get("canal") == "instagram":
                             enviar_imagen_instagram(identificador, foto_url)
                         else:
