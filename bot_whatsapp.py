@@ -176,35 +176,169 @@ def formatear_identificador_cliente(identificador, es_instagram=False):
 # ─────────────────────────────────────────
 # GOOGLE SHEETS: LEER INVENTARIO
 # ─────────────────────────────────────────
-def obtener_inventario(sheet_id):
-    """Lee el inventario desde Google Sheets en tiempo real."""
+# Cuántos productos como máximo se le mandan a GPT por mensaje.
+# Si el inventario es pequeño (<= este número) se manda completo.
+MAX_PRODUCTOS_PROMPT = 40
+# Cada cuánto se vuelve a leer el Sheet (segundos). Así no se consulta
+# Google en cada mensaje, pero los cambios del Sheet se ven en ~5 min.
+CACHE_INVENTARIO_SEG = 300
+_cache_inventario = {}  # sheet_id -> (momento_lectura, filas)
+
+# Palabras que no sirven para buscar productos
+PALABRAS_VACIAS = {
+    "hola", "buenas", "buenos", "dias", "tardes", "noches", "quiero", "queria",
+    "necesito", "busco", "tienen", "tiene", "tienes", "hay", "para", "por", "con",
+    "sin", "que", "cual", "cuales", "cuanto", "cuesta", "vale", "valen", "precio",
+    "una", "uno", "unos", "unas", "los", "las", "del", "mas", "muy", "como",
+    "favor", "gracias", "talla", "color", "foto", "fotos", "imagen", "ver",
+    "mandar", "manda", "envia", "enviar", "disponible", "disponibles", "esa",
+    "ese", "esas", "esos", "esta", "este", "estas", "estos", "otra", "otro",
+    "tambien", "pero", "porfa", "algo", "alguna", "alguno", "me", "mi",
+}
+
+# Cómo lo dice el cliente -> cómo aparece en el inventario
+SINONIMOS = {
+    "brasier": ["bra", "brasier", "brassier", "brassie"],
+    "brassier": ["bra", "brasier", "brassier", "brassie"],
+    "sosten": ["bra", "brasier", "brassier"],
+    "calzon": ["panty", "cachetero"], "calzones": ["panty", "cachetero"],
+    "bombacha": ["panty"], "tanga": ["panty"],
+    "interior": ["boxer", "panty"], "interiores": ["boxer", "panty"],
+    "calzoncillo": ["boxer"], "calzoncillos": ["boxer"],
+    "pijamas": ["pijama", "pijma"],
+    "varices": ["medivaric", "novarix", "varix", "compresion"],
+    "varice": ["medivaric", "novarix", "varix", "compresion"],
+    "compresion": ["compresion", "medivaric", "novarix", "varix"],
+    "diabetico": ["diabetico", "medivaric"], "diabeticos": ["diabetico", "medivaric"],
+    "pantimedias": ["pantimedia", "panty"], "veladas": ["velada", "panty"],
+    "colegio": ["colegial"], "colegiales": ["colegial"],
+    "deporte": ["deportiva", "sport"], "deportivas": ["deportiva", "sport"],
+    "vestido": ["traje", "bano"], "vestidos": ["traje", "bano"],
+    "baño": ["bano"], "bano": ["bano"],
+}
+
+
+def _normalizar(texto):
+    """minúsculas, sin tildes, solo letras/números."""
+    texto = str(texto).lower()
+    for a, b in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ü", "u"), ("ñ", "n")):
+        texto = texto.replace(a, b)
+    return re.findall(r"[a-z0-9]+", texto)
+
+
+def _raiz(palabra):
+    """'medias' -> 'media', 'negros' -> 'negro' (singular simple)."""
+    if len(palabra) > 4 and palabra.endswith("es") and not palabra[-3].isdigit():
+        return palabra[:-2] if palabra[-3] in "rlnd" else palabra[:-1]
+    if len(palabra) > 3 and palabra.endswith("s"):
+        return palabra[:-1]
+    return palabra
+
+
+def leer_hoja_inventario(sheet_id):
+    """Lee las filas del Sheet, guardándolas en caché unos minutos."""
+    ahora = time.time()
+    if sheet_id in _cache_inventario:
+        momento, filas = _cache_inventario[sheet_id]
+        if ahora - momento < CACHE_INVENTARIO_SEG:
+            return filas
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+    creds = Credentials.from_service_account_info(creds_json, scopes=scope)
+    gc = gspread.authorize(creds)
+    hoja = gc.open_by_key(sheet_id).sheet1
+    filas = hoja.get_all_records()
+    _cache_inventario[sheet_id] = (ahora, filas)
+    logger.info(f"Google Sheets ({sheet_id[:8]}...): {len(filas)} filas leídas")
+    return filas
+
+
+def _linea_producto(item):
+    disponible = item.get("Disponible", 0)
+    if isinstance(disponible, (int, float)):
+        estado = f"✅ {int(disponible)} unidades" if disponible > 0 else "❌ Agotado"
+    else:
+        estado = "✅ Disponible" if str(disponible).strip().lower() in ("sí", "si") else "❌ Agotado"
+    talla = item.get("Talla") or ""
+    talla = f" talla {talla}" if str(talla).strip() else ""
+    precio = item.get("Precio") or ""
+    precio = precio if str(precio).strip() else "precio por confirmar"
+    return f"- {item.get('Producto', '')}{talla}: {precio} — {estado}\n"
+
+
+def _buscar_relevantes(datos, consulta):
+    """Devuelve los productos que más se parecen a lo que escribió el cliente."""
+    palabras = set()
+    for p in _normalizar(consulta):
+        if p in PALABRAS_VACIAS or (len(p) < 3 and not p.isdigit()):
+            continue
+        palabras.add(_raiz(p))
+        for s in SINONIMOS.get(p, []):
+            palabras.add(s)
+    if not palabras:
+        return []
+
+    puntuados = []
+    for item in datos:
+        tokens = {_raiz(t) for t in _normalizar(item.get("Producto", ""))}
+        puntos = sum(
+            1 for p in palabras
+            if p in tokens or (len(p) >= 4 and any(t.startswith(p) for t in tokens))
+        )
+        if puntos:
+            disponible = item.get("Disponible", 0)
+            hay = 1 if (isinstance(disponible, (int, float)) and disponible > 0) else 0
+            puntuados.append((puntos, hay, item))
+
+    puntuados.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [item for _, _, item in puntuados[:MAX_PRODUCTOS_PROMPT]]
+
+
+def obtener_inventario(sheet_id, consulta=""):
+    """Arma el texto del inventario para el prompt.
+
+    Si el inventario es grande, solo incluye los productos relacionados con
+    'consulta' (lo que el cliente ha escrito), para no gastar miles de tokens
+    en cada mensaje.
+    """
     if not sheet_id:
         return ""
     try:
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
-        gc = gspread.authorize(creds)
-        hoja = gc.open_by_key(sheet_id).sheet1
-        datos = hoja.get_all_records()
-        logger.info(f"Google Sheets ({sheet_id[:8]}...): {len(datos)} filas leídas")
-
+        datos = leer_hoja_inventario(sheet_id)
         if not datos:
             return ""
 
-        inventario_texto = "INVENTARIO ACTUAL:\n"
-        for item in datos:
-            disponible = item.get("Disponible", 0)
-            if isinstance(disponible, int):
-                estado = f"✅ {disponible} unidades" if disponible > 0 else "❌ Agotado"
-            else:
-                estado = "✅ Disponible" if str(disponible).lower() == "sí" else "❌ Agotado"
-            inventario_texto += f"- {item['Producto']} talla {item['Talla']}: {item['Precio']} — {estado}\n"
+        # Inventario pequeño: se manda completo, como antes
+        if len(datos) <= MAX_PRODUCTOS_PROMPT:
+            return "INVENTARIO ACTUAL:\n" + "".join(_linea_producto(i) for i in datos)
 
-        return inventario_texto
+        relevantes = _buscar_relevantes(datos, consulta)
+        if relevantes:
+            texto = (
+                f"INVENTARIO (solo los productos relacionados con lo que pregunta el cliente; "
+                f"la tienda tiene {len(datos)} productos en total):\n"
+            )
+            texto += "".join(_linea_producto(i) for i in relevantes)
+            texto += (
+                "\nSi el cliente pregunta por algo que no aparece en esta lista, NO digas que no lo "
+                "tenemos: pídele más detalles (marca, referencia, color o tipo de producto).\n"
+            )
+            return texto
+
+        # No hubo coincidencias (ej. "hola"): solo un resumen de marcas/tipos
+        conteo = Counter(_normalizar(i.get("Producto", ""))[0].upper()
+                         for i in datos if _normalizar(i.get("Producto", "")))
+        resumen = ", ".join(f"{marca} ({n})" for marca, n in conteo.most_common(30))
+        return (
+            f"INVENTARIO: la tienda tiene {len(datos)} productos. Marcas/tipos principales "
+            f"(cantidad de referencias): {resumen}.\n"
+            "Todavía no sabes qué producto busca el cliente: pregúntale qué necesita "
+            "(tipo de prenda, marca, talla, color) antes de dar precios o disponibilidad. "
+            "NO digas que un producto no existe solo porque no aparece aquí.\n"
+        )
     except Exception as e:
         logger.error(f"Error leyendo Google Sheets ({sheet_id}): {e}")
         return ""
@@ -216,15 +350,7 @@ def buscar_foto_producto(sheet_id, producto, talla=None):
     if not sheet_id:
         return None
     try:
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
-        gc = gspread.authorize(creds)
-        hoja = gc.open_by_key(sheet_id).sheet1
-        datos = hoja.get_all_records()
+        datos = leer_hoja_inventario(sheet_id)
 
         producto_norm = producto.strip().lower()
 
@@ -339,7 +465,7 @@ def cargar_info_negocio(phone_number_id):
         with open("negocio.txt", "r", encoding="utf-8") as f:
             return f.read()
 
-def crear_system_message(phone_number_id):
+def crear_system_message(phone_number_id, consulta=""):
     """Crea el system message con info del negocio, inventario y flujo de compra.
 
     Toda la identidad del negocio (nombre, saludo, dirección, datos de pago)
@@ -348,7 +474,7 @@ def crear_system_message(phone_number_id):
     """
     config = obtener_config_negocio(phone_number_id)
     info = cargar_info_negocio(phone_number_id)
-    inventario = obtener_inventario(config["sheet_id"])
+    inventario = obtener_inventario(config["sheet_id"], consulta)
 
     return {
         "role": "system",
@@ -714,10 +840,18 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
     # cliente pueda hablar con dos negocios distintos sin mezclar historiales.
     clave_conversacion = f"{phone_number_id}:{identificador}"
 
+    # Para elegir qué productos mandarle a GPT usamos el mensaje actual + los
+    # 3 mensajes anteriores del cliente (por si dice "¿y en talla M?").
+    anteriores = [
+        m["content"] for m in conversaciones.get(clave_conversacion, [])
+        if m.get("role") == "user"
+    ][-3:]
+    consulta = " ".join(anteriores + [mensaje_usuario])
+
     if clave_conversacion not in conversaciones:
-        conversaciones[clave_conversacion] = [crear_system_message(phone_number_id)]
+        conversaciones[clave_conversacion] = [crear_system_message(phone_number_id, consulta)]
     else:
-        conversaciones[clave_conversacion][0] = crear_system_message(phone_number_id)
+        conversaciones[clave_conversacion][0] = crear_system_message(phone_number_id, consulta)
 
     conversaciones[clave_conversacion].append({"role": "user", "content": mensaje_usuario})
 
