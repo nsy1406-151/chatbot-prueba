@@ -62,10 +62,14 @@ NEGOCIOS_CONFIG = {
         # al admin salen desde este número de WhatsApp del negocio:
         "notificar_desde": "1290940880772557",
     },
-    # "OTRO_PHONE_NUMBER_ID_AQUI": {
-    #     "archivo": "negocios/otro_negocio.txt",
-    #     "sheet_id": "otro_sheet_id_de_google",
+    # ── Plantilla para un negocio nuevo ──
+    # "PHONE_NUMBER_ID_DEL_NEGOCIO": {
+    #     "archivo": "negocios/nombre_negocio.txt",           # su información y prompt
+    #     "sheet_id": os.getenv("SHEET_ID_NOMBRE_NEGOCIO"),   # su inventario
+    #     "admin": "57300XXXXXXX",                            # dueño: recibe pedidos y usa comandos
+    #     # o varios: "admins": ["57300XXXXXXX", "573152251406"],
     # },
+    # Si un negocio no tiene "admin"/"admins", las notificaciones van a NUMERO_ADMIN.
 }
 
 NEGOCIO_DEFAULT = {
@@ -77,8 +81,9 @@ NEGOCIO_DEFAULT = {
 # ESTADO DEL BOT
 # ─────────────────────────────────────────
 conversaciones = {}
-pausados = set()
-bot_activo = True
+pausados = set()            # "id_negocio:cliente" con el bot pausado
+negocios_pausados = set()   # negocios donde el admin escribió "pausar todo"
+bot_activo = True           # interruptor global (solo NUMERO_ADMIN: "pausar global")
 MAX_MENSAJES_PROCESADOS = 500
 # OrderedDict recuerda el orden en que entraron los IDs, así cuando
 # se llena sacamos el MÁS VIEJO (un set sacaba uno al azar).
@@ -109,6 +114,7 @@ def guardar_estado():
             "conversaciones": conversaciones,
             "pausados": list(pausados),
             "bot_activo": bot_activo,
+            "negocios_pausados": list(negocios_pausados),
         }
         with open(ESTADO_ARCHIVO, "w", encoding="utf-8") as f:
             json.dump(estado, f, ensure_ascii=False)
@@ -124,6 +130,7 @@ def cargar_estado():
         conversaciones.update(estado.get("conversaciones", {}))
         pausados.update(estado.get("pausados", []))
         bot_activo = estado.get("bot_activo", True)
+        negocios_pausados.update(estado.get("negocios_pausados", []))
         logger.info(f"Estado cargado: {len(conversaciones)} conversaciones, {len(pausados)} pausados")
     except FileNotFoundError:
         logger.info("No hay estado previo — arrancando limpio")
@@ -483,6 +490,45 @@ def limpiar_logs_antiguos(sheet_id, meses_a_conservar=2):
 def obtener_config_negocio(phone_number_id):
     return NEGOCIOS_CONFIG.get(phone_number_id, NEGOCIO_DEFAULT)
 
+
+def id_negocio(phone_number_id):
+    """Identificador del NEGOCIO (no del canal). Un negocio con WhatsApp e
+    Instagram tiene dos entradas en NEGOCIOS_CONFIG; las agrupamos usando el
+    número de WhatsApp ("notificar_desde") para que pausas y comandos del
+    admin apliquen a los dos canales a la vez."""
+    config = obtener_config_negocio(phone_number_id)
+    return config.get("notificar_desde", phone_number_id)
+
+
+def canales_del_negocio(phone_number_id):
+    """Todos los IDs (WhatsApp, Instagram...) que pertenecen al mismo negocio."""
+    negocio = id_negocio(phone_number_id)
+    ids = {pid for pid in NEGOCIOS_CONFIG if id_negocio(pid) == negocio}
+    ids.add(phone_number_id)
+    return ids
+
+
+def admins_de(phone_number_id):
+    """Números de WhatsApp de los administradores de ESTE negocio.
+    En NEGOCIOS_CONFIG puedes poner "admin": "57300..." o
+    "admins": ["57300...", "57315..."]. Si no hay, se usa NUMERO_ADMIN."""
+    config = obtener_config_negocio(phone_number_id)
+    if not (config.get("admins") or config.get("admin")):
+        config = obtener_config_negocio(id_negocio(phone_number_id))  # IG hereda del WhatsApp
+    admins = config.get("admins") or config.get("admin") or NUMERO_ADMIN
+    if isinstance(admins, str):
+        admins = [admins]
+    return [re.sub(r"\D", "", str(a)) for a in admins if a]
+
+
+def clave_pausa(phone_number_id, identificador):
+    return f"{id_negocio(phone_number_id)}:{identificador}"
+
+
+def esta_pausado(phone_number_id, identificador):
+    # 'identificador' solo (sin negocio) = pausas antiguas, se siguen respetando
+    return clave_pausa(phone_number_id, identificador) in pausados or identificador in pausados
+
 def cargar_info_negocio(phone_number_id):
     config = obtener_config_negocio(phone_number_id)
     archivo = config["archivo"]
@@ -699,8 +745,9 @@ def notificar_admin_texto(mensaje, phone_number_id):
     try:
         config = obtener_config_negocio(phone_number_id)
         numero_envio = config.get("notificar_desde", phone_number_id)
-        enviar_mensaje_whatsapp(NUMERO_ADMIN, mensaje, numero_envio)
-        logger.info("Notificación texto enviada al admin por Meta API")
+        for admin in admins_de(phone_number_id):
+            enviar_mensaje_whatsapp(admin, mensaje, numero_envio)
+        logger.info(f"Notificación texto enviada a {len(admins_de(phone_number_id))} admin(s) por Meta API")
     except Exception as e:
         logger.error(f"Error notificando admin por Meta: {e}")
 
@@ -719,23 +766,24 @@ def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
         cliente_display = formatear_identificador_cliente(numero_cliente)
 
         url_send = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": NUMERO_ADMIN,
-            "type": "image",
-            "image": {
-                "link": image_url,
-                "caption": f"📸 *Comprobante de pago recibido*\n👤 Cliente: {cliente_display}"
+        for admin in admins_de(phone_number_id):
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": admin,
+                "type": "image",
+                "image": {
+                    "link": image_url,
+                    "caption": f"📸 *Comprobante de pago recibido*\n👤 Cliente: {cliente_display}"
+                }
             }
-        }
-        req.post(
-            url_send,
-            headers={
-                "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
-                "Content-Type": "application/json"
-            },
-            json=payload
-        )
+            req.post(
+                url_send,
+                headers={
+                    "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            )
         logger.info(f"Comprobante reenviado al admin desde cliente {numero_cliente}")
     except Exception as e:
         logger.error(f"Error reenviando comprobante: {e}")
@@ -756,7 +804,7 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
     # ── Detectar solicitud de atención humana ──
     if "ATENCION_HUMANA_SOLICITADA" in respuesta_texto:
         respuesta_texto = respuesta_texto.replace("ATENCION_HUMANA_SOLICITADA", "").strip()
-        pausados.add(identificador)   # 👈 pausa automática
+        pausados.add(clave_pausa(phone_number_id, identificador))   # 👈 pausa automática (solo en este negocio)
         guardar_estado()
         mensaje_admin = (
             f"🙋 *Atención humana solicitada*\n\n"
@@ -855,62 +903,82 @@ def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
 def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
     global bot_activo
 
-    # ── Comandos del administrador ──
+    # ── Comandos del administrador (solo afectan a SU negocio) ──
     if es_admin:
         cmd = mensaje_usuario.lower().strip()
-        if cmd.startswith("pausar "):
+        negocio = id_negocio(phone_number_id)
+        canales = canales_del_negocio(phone_number_id)
+        prefijo = f"{negocio}:"
+        if cmd.startswith("pausar ") and cmd not in ("pausar todo", "pausar global"):
             id_pausar = resolver_identificador(mensaje_usuario[7:])
-            pausados.add(id_pausar)
+            pausados.add(clave_pausa(phone_number_id, id_pausar))
             guardar_estado()
             return f"✅ Bot pausado para {id_pausar}"
-        elif cmd.startswith("activar "):
+        elif cmd.startswith("activar ") and cmd not in ("activar todo", "activar global"):
             id_activar = resolver_identificador(mensaje_usuario[8:])
-            pausados.discard(id_activar)
+            pausados.discard(clave_pausa(phone_number_id, id_activar))
+            pausados.discard(id_activar)  # por si quedó una pausa antigua
             guardar_estado()
             return f"✅ Bot reactivado para {id_activar}"
         elif cmd == "lista":
-            if pausados:
-                return "📋 Conversaciones pausadas:\n" + "\n".join(pausados)
+            mios = [p[len(prefijo):] for p in pausados if p.startswith(prefijo)]
+            if mios:
+                return "📋 Conversaciones pausadas:\n" + "\n".join(mios)
             return "✅ No hay conversaciones pausadas."
         elif cmd == "pausar todo":
-            bot_activo = False
+            negocios_pausados.add(negocio)
             guardar_estado()
-            return "⏸️ Bot pausado para todos los usuarios."
+            return "⏸️ Bot pausado para todos los clientes de este negocio."
         elif cmd == "activar todo":
-            bot_activo = True
+            negocios_pausados.discard(negocio)
             guardar_estado()
-            return "▶️ Bot reactivado para todos los usuarios."
+            return "▶️ Bot reactivado para todos los clientes de este negocio."
+        elif cmd in ("pausar global", "activar global"):
+            # Solo el dueño de la plataforma (NUMERO_ADMIN) puede apagar TODOS los negocios
+            if re.sub(r"\D", "", str(identificador)) != re.sub(r"\D", "", NUMERO_ADMIN):
+                return "⛔ Este comando solo lo puede usar el administrador de la plataforma."
+            bot_activo = (cmd == "activar global")
+            guardar_estado()
+            return "▶️ Bot reactivado en todos los negocios." if bot_activo else "⏸️ Bot pausado en TODOS los negocios."
         elif cmd == "estado":
-            estado = "✅ Activo" if bot_activo else "⏸️ Pausado globalmente"
+            if not bot_activo:
+                estado = "⏸️ Pausado globalmente"
+            elif negocio in negocios_pausados:
+                estado = "⏸️ Pausado en este negocio"
+            else:
+                estado = "✅ Activo"
+            activas = sum(1 for c in conversaciones if c.split(":", 1)[0] in canales)
             return (
                 f"📊 Estado del bot:\n"
-                f"• Estado global: {estado}\n"
-                f"• Conversaciones activas: {len(conversaciones)}\n"
-                f"• Usuarios pausados: {len(pausados)}"
+                f"• Estado: {estado}\n"
+                f"• Conversaciones activas: {activas}\n"
+                f"• Usuarios pausados: {sum(1 for p in pausados if p.startswith(prefijo))}"
             )
-        elif cmd.startswith("borrar "):
+        elif cmd.startswith("borrar ") and cmd != "borrar todo":
             id_borrar = resolver_identificador(mensaje_usuario[7:])
-            clave_borrar = f"{phone_number_id}:{id_borrar}"
-            if clave_borrar in conversaciones:
-                del conversaciones[clave_borrar]
+            claves = [f"{c}:{id_borrar}" for c in canales if f"{c}:{id_borrar}" in conversaciones]
+            if claves:
+                for k in claves:
+                    del conversaciones[k]
                 guardar_estado()
                 return f"🗑️ Historial borrado para {id_borrar}"
             return f"No encontré conversación activa para {id_borrar}"
         elif cmd == "borrar todo":
-            conversaciones.clear()
+            for k in [c for c in conversaciones if c.split(":", 1)[0] in canales]:
+                del conversaciones[k]
             guardar_estado()
-            return "🗑️ Todos los historiales borrados."
+            return "🗑️ Todos los historiales de este negocio borrados."
         elif cmd == "ayuda":
             return (
                 "📖 Comandos disponibles:\n\n"
                 "• *pausar [número o @username]* — pausa el bot para ese usuario\n"
                 "• *activar [número o @username]* — reactiva el bot para ese usuario\n"
-                "• *pausar todo* — pausa el bot para todos\n"
-                "• *activar todo* — reactiva el bot para todos\n"
+                "• *pausar todo* — pausa el bot para todos los clientes de este negocio\n"
+                "• *activar todo* — reactiva el bot para todos los clientes de este negocio\n"
                 "• *lista* — muestra usuarios pausados\n"
                 "• *estado* — muestra el estado actual del bot\n"
                 "• *borrar [número o @username]* — borra el historial de un usuario\n"
-                "• *borrar todo* — borra todos los historiales\n"
+                "• *borrar todo* — borra todos los historiales de este negocio\n"
                 "• *ayuda* — muestra este menú\n\n"
                 "_Puedes usar el número, el username (sin @) o el código completo, según lo que te haya mostrado la notificación._"
             )
@@ -918,7 +986,9 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
     # ── Verificaciones antes de responder ──
     if not bot_activo:
         return None
-    if identificador in pausados:
+    if id_negocio(phone_number_id) in negocios_pausados:
+        return None
+    if esta_pausado(phone_number_id, identificador):
         return None
 
     # ── Lógica normal del chatbot ──
@@ -1059,7 +1129,7 @@ def whatsapp_meta_reply():
 
     logger.info(f"Meta - mensaje de {numero} a negocio {phone_number_id}: {mensaje_usuario[:50]}")
 
-    es_admin = (numero == NUMERO_ADMIN)
+    es_admin = (re.sub(r"\D", "", str(numero)) in admins_de(phone_number_id))
     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, phone_number_id)
 
     if respuesta_texto:
@@ -1242,7 +1312,8 @@ def instagram_reply():
 
     logger.info(f"Instagram - mensaje de {numero}: {mensaje_usuario[:50]}")
 
-    es_admin = (numero == NUMERO_ADMIN)
+    # Los admins manejan el bot desde WhatsApp, no desde Instagram
+    es_admin = False
     respuesta_texto = procesar_mensaje(numero, mensaje_usuario, es_admin, INSTAGRAM_ACCOUNT_ID)
 
     if respuesta_texto:
@@ -1303,25 +1374,26 @@ def reenviar_imagen_admin(image_url, numero_cliente, phone_number_id):
             logger.error(f"Error subiendo comprobante a WhatsApp: {subida.status_code} - {subida.text}")
             return
 
-        # 3. Enviarla al admin usando el ID (no el link)
-        envio = req.post(
-            f"https://graph.facebook.com/v19.0/{numero_envio}/messages",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "messaging_product": "whatsapp",
-                "to": NUMERO_ADMIN,
-                "type": "image",
-                "image": {
-                    "id": media_id,
-                    "caption": f"📸 *Comprobante de pago recibido (Instagram)*\n👤 Cliente IG: {numero_cliente}\n\n_Respóndele desde la bandeja de Instagram._"
-                }
-            },
-            timeout=20
-        )
-        logger.info(f"Comprobante de IG reenviado al admin: {envio.status_code} - {envio.text}")
+        # 3. Enviarla a cada admin usando el ID (no el link)
+        for admin in admins_de(phone_number_id):
+            envio = req.post(
+                f"https://graph.facebook.com/v19.0/{numero_envio}/messages",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": admin,
+                    "type": "image",
+                    "image": {
+                        "id": media_id,
+                        "caption": f"📸 *Comprobante de pago recibido (Instagram)*\n👤 Cliente IG: {numero_cliente}\n\n_Respóndele desde la bandeja de Instagram._"
+                    }
+                },
+                timeout=20
+            )
+            logger.info(f"Comprobante de IG reenviado al admin {admin}: {envio.status_code} - {envio.text}")
     except Exception as e:
         logger.error(f"Error reenviando comprobante de IG: {e}")
 
@@ -1500,13 +1572,14 @@ def reporte_mensual():
         # Si el canal no puede recibir mensajes de admin directamente (ej. Instagram),
         # usamos "notificar_desde" para mandar el resumen por WhatsApp en su lugar.
         phone_number_id_envio = config.get("notificar_desde", phone_number_id)
-        negocios_vistos[sheet_id] = (nombre_negocio, phone_number_id_envio)
+        negocios_vistos[sheet_id] = (nombre_negocio, phone_number_id_envio, admins_de(phone_number_id))
 
     negocios_procesados = []
-    for sheet_id, (nombre_negocio, phone_number_id_envio) in negocios_vistos.items():
+    for sheet_id, (nombre_negocio, phone_number_id_envio, admins) in negocios_vistos.items():
         resumen = generar_resumen_mensual(sheet_id, nombre_negocio)
         if resumen:
-            enviar_mensaje_whatsapp(NUMERO_ADMIN, resumen, phone_number_id_envio)
+            for admin in admins:
+                enviar_mensaje_whatsapp(admin, resumen, phone_number_id_envio)
             negocios_procesados.append(nombre_negocio)
         limpiar_logs_antiguos(sheet_id)   # 👈 nuevo
         time.sleep(1)
