@@ -52,11 +52,11 @@ MAX_MENSAJES = 20
 NEGOCIOS_CONFIG = {
     "1290940880772557.": {  #SoloMedias para probar imagenes.
         "archivo": "negocios/solo_medias.txt",
-        "sheet_id": os.getenv("SHEET_ID"),
+        "sheet_id": os.getenv("SHEET_ID_SOLOMEDIAS"),
     },
     "17841443710781118": {  # Instagram @chatbots.co
         "archivo": "negocios/solo_medias.txt",
-        "sheet_id": os.getenv("SHEET_ID"),
+        "sheet_id": os.getenv("SHEET_ID_SOLOMEDIAS"),
         "canal": "instagram",
         # Instagram no puede mandarte WhatsApps, así que los avisos
         # al admin salen desde este número de WhatsApp del negocio:
@@ -64,7 +64,7 @@ NEGOCIOS_CONFIG = {
     },
     "1290940880772557": {  # Whatsapp Izanprali
         "archivo": "negocios/urbana_style.txt",
-        "sheet_id": os.getenv("SHEET_ID"),
+        "sheet_id": os.getenv("SHEET_ID_IZANPRALI"),
         "canal": "whatsapp",
         # Instagram no puede mandarte WhatsApps, así que los avisos
         # al admin salen desde este número de WhatsApp del negocio:
