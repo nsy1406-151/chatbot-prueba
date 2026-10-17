@@ -797,6 +797,70 @@ def notificar_admin_imagen(image_id, numero_cliente, phone_number_id):
         logger.error(f"Error reenviando comprobante: {e}")
 
 # ─────────────────────────────────────────
+# NOTAS DE VOZ (transcripción con OpenAI)
+# ─────────────────────────────────────────
+MAX_BYTES_AUDIO = 5 * 1024 * 1024  # ~5 MB: de sobra para notas de voz normales
+
+def transcribir_audio(contenido, mime="audio/ogg"):
+    """Recibe los bytes de un audio y devuelve el texto transcrito (o None)."""
+    if not contenido:
+        return None
+    if len(contenido) > MAX_BYTES_AUDIO:
+        logger.warning(f"Audio demasiado grande ({len(contenido)} bytes) — no se transcribe")
+        return None
+
+    # Extensión según el tipo, para que OpenAI reconozca el formato
+    mime = (mime or "").split(";")[0].strip()
+    extensiones = {
+        "audio/ogg": "ogg", "audio/opus": "ogg", "audio/mpeg": "mp3",
+        "audio/mp4": "m4a", "audio/aac": "m4a", "audio/x-m4a": "m4a",
+        "audio/wav": "wav", "audio/webm": "webm",
+    }
+    extension = extensiones.get(mime, "ogg")
+
+    try:
+        resultado = client.audio.transcriptions.create(
+            model="gpt-4o-mini-transcribe",
+            file=(f"nota_de_voz.{extension}", contenido),
+            language="es",
+        )
+        texto = (resultado.text or "").strip()
+        logger.info(f"🎤 Audio transcrito: {texto[:80]}")
+        return texto or None
+    except Exception as e:
+        logger.error(f"Error transcribiendo audio: {e}")
+        return None
+
+def descargar_audio_whatsapp(media_id):
+    """Descarga un audio de WhatsApp (Meta). Devuelve (bytes, mime) o (None, None)."""
+    try:
+        headers = {"Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}"}
+        info = req.get(f"https://graph.facebook.com/v19.0/{media_id}", headers=headers, timeout=20).json()
+        url_audio = info.get("url")
+        if not url_audio:
+            logger.error(f"No se pudo obtener la URL del audio: {info}")
+            return None, None
+        # Ojo: la descarga también necesita el token, si no Meta devuelve error
+        descarga = req.get(url_audio, headers=headers, timeout=30)
+        descarga.raise_for_status()
+        return descarga.content, info.get("mime_type", "audio/ogg")
+    except Exception as e:
+        logger.error(f"Error descargando audio de WhatsApp: {e}")
+        return None, None
+
+def descargar_audio_instagram(url_audio):
+    """Descarga un audio de Instagram (la URL ya viene lista en el webhook)."""
+    try:
+        descarga = req.get(url_audio, timeout=30)
+        descarga.raise_for_status()
+        return descarga.content, descarga.headers.get("Content-Type", "audio/mp4")
+    except Exception as e:
+        logger.error(f"Error descargando audio de Instagram: {e}")
+        return None, None
+
+MENSAJE_AUDIO_FALLIDO = "Uy, no pude escuchar bien tu nota de voz 😅 ¿Me lo puedes escribir o mandar otra vez?"
+
+# ─────────────────────────────────────────
 # PROCESAMIENTO DE EVENTOS ESPECIALES
 # ─────────────────────────────────────────
 def procesar_respuesta(respuesta_texto, identificador, phone_number_id):
@@ -1121,15 +1185,24 @@ def whatsapp_meta_reply():
             )
             return "OK", 200
 
-        if tipo != "text":
+        # ── Notas de voz: se transcriben y se tratan como texto normal ──
+        if tipo == "audio":
+            contenido, mime = descargar_audio_whatsapp(mensaje_evento["audio"]["id"])
+            mensaje_usuario = transcribir_audio(contenido, mime)
+            if not mensaje_usuario:
+                enviar_mensaje_whatsapp(numero, MENSAJE_AUDIO_FALLIDO, phone_number_id)
+                return "OK", 200
+
+        elif tipo != "text":
             enviar_mensaje_whatsapp(
                 numero,
-                "Por el momento solo puedo responder mensajes de texto e imágenes. 😊",
+                "Por el momento solo puedo responder mensajes de texto, imágenes y notas de voz. 😊",
                 phone_number_id
             )
             return "OK", 200
 
-        mensaje_usuario = mensaje_evento["text"]["body"]
+        else:
+            mensaje_usuario = mensaje_evento["text"]["body"]
 
     except (KeyError, IndexError) as e:
         logger.error(f"Error extrayendo mensaje: {e}")
@@ -1296,6 +1369,18 @@ def instagram_reply():
             return "OK", 200
 
         mensaje_usuario = evento["message"].get("text")
+
+        # ── Notas de voz: se transcriben y se tratan como texto normal ──
+        if not mensaje_usuario:
+            adjuntos = evento["message"].get("attachments", [])
+            audio = next((a for a in adjuntos if a.get("type") == "audio"), None)
+            if audio:
+                contenido, mime = descargar_audio_instagram(audio["payload"]["url"])
+                mensaje_usuario = transcribir_audio(contenido, mime)
+                if not mensaje_usuario:
+                    enviar_mensaje_instagram(numero, MENSAJE_AUDIO_FALLIDO)
+                    return "OK", 200
+
         if not mensaje_usuario:
             # Mensaje sin texto: si trae una imagen, la tratamos como
             # comprobante de pago (igual que en WhatsApp).
@@ -1310,7 +1395,7 @@ def instagram_reply():
             else:
                 enviar_mensaje_instagram(
                     numero,
-                    "Por el momento solo puedo responder mensajes de texto e imágenes. 😊"
+                    "Por el momento solo puedo responder mensajes de texto, imágenes y notas de voz. 😊"
                 )
             return "OK", 200
 
