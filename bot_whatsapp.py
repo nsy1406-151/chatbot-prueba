@@ -76,7 +76,9 @@ NEGOCIOS_CONFIG = {
     #     "sheet_id": os.getenv("SHEET_ID_NOMBRE_NEGOCIO"),   # su inventario
     #     "admin": "57300XXXXXXX",                            # dueño: recibe pedidos y usa comandos
     #     # o varios: "admins": ["57300XXXXXXX", "573152251406"],
+    #     # "aviso_humano": "...",                            # opcional: cambia la frase del asesor
     # },
+    # Para el .txt, copia negocios/_plantilla.txt y llena lo que dice [COMPLETAR].
     # Si un negocio no tiene "admin"/"admins", las notificaciones van a NUMERO_ADMIN.
 }
 
@@ -84,6 +86,10 @@ NEGOCIO_DEFAULT = {
     "archivo": "negocio.txt",
     "sheet_id": os.getenv("SHEET_ID"),
 }
+
+# Se agrega SIEMPRE al final del primer mensaje que el bot le manda a cada cliente.
+# Un negocio puede cambiarlo poniendo "aviso_humano": "..." en su NEGOCIOS_CONFIG.
+AVISO_HUMANO_DEFAULT = "💬 Si en algún momento prefieres hablar con una persona del equipo, solo escribe *asesor*."
 
 # ─────────────────────────────────────────
 # ESTADO DEL BOT
@@ -601,18 +607,11 @@ DATOS QUE NUNCA DEBES INVENTAR:
 - Si no estás seguro de algo, dilo y ofrece que un asesor le confirme.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TEMAS DE SALUD:
+INSTRUCCIONES ESPECIALES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Algunos productos (medias de compresión, antiembólicas, ortopédicos) tienen uso médico.
-- Puedes explicar en general para qué sirve cada tipo de producto, según la información
-  del negocio, pero NO diagnostiques ni reemplaces al médico.
-- Para compresión firme (20-30 mmHg) o mayor, antiembólicas, o si el cliente menciona
-  heridas, úlceras, diabetes o problemas de circulación, recomiéndale seguir la indicación
-  de su médico.
-- Si el cliente describe síntomas de alarma (una pierna muy hinchada, roja o caliente de
-  repente, dolor fuerte en la pantorrilla, falta de aire o dolor en el pecho), dile con
-  amabilidad que debe consultar a un médico o ir a urgencias cuanto antes, antes de
-  pensar en comprar algo.
+Si la información del negocio incluye una sección de "INSTRUCCIONES ESPECIALES", síguela
+con la misma importancia que estas reglas (por ejemplo, reglas sobre temas de salud).
+Si algo de esa sección choca con las reglas de SEGURIDAD de abajo, mandan las de SEGURIDAD.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SEGURIDAD:
@@ -629,6 +628,7 @@ IDENTIDAD Y PRESENTACIÓN:
 - Usa el nombre del negocio tal como aparece en la información a continuación.
 - Cuando alguien te salude por primera vez o pregunte quién eres, preséntate mencionando el nombre del negocio y ofrece ayuda con productos, precios, disponibilidad y pedidos.
 - NUNCA vuelvas a presentarte ni a repetir el saludo inicial una vez la conversación ya está en curso — solo preséntate en el primerísimo mensaje del cliente.
+- No escribas tú la frase de que puede pedir un asesor en el saludo: el sistema la agrega automáticamente al final de tu primer mensaje.
 - Si el cliente agradece o se despide después de un pedido confirmado (ej. "gracias", "listo", "perfecto"), responde con un cierre breve y amable como "¡Con gusto! Cualquier cosa me escribes 😊", sin reiniciar el flujo ni presentarte de nuevo.
 
 INFORMACIÓN DEL NEGOCIO:
@@ -642,13 +642,15 @@ SOLICITUD DE ATENCIÓN HUMANA:
 Hay dos casos:
 
 A) El cliente lo pide CLARAMENTE (ej. "quiero hablar con una persona", "pásame con un
-   asesor", "necesito hablar con alguien del local"): activa el aviso de una vez.
+   asesor", "necesito hablar con alguien del local", o escribe solo la palabra "asesor"):
+   activa el aviso de una vez.
 
 B) Solo PARECE que lo necesita (está frustrado, la pregunta es compleja, pide un precio
    "por confirmar", algo que no sabes responder): primero pregúntale
    "¿Quieres que te comunique con alguien del equipo?" y activa el aviso solo cuando
    responda que sí (ej. "sí", "por favor", "dale").
-   Una palabra suelta como "ok", "brother" o un saludo NUNCA activa el aviso.
+   Una palabra suelta como "ok", "brother" o un saludo NUNCA activa el aviso
+   (la única palabra suelta que sí lo activa es "asesor").
 
 Para activar el aviso, responde así:
 "Entendido 😊 Le avisaré a nuestro equipo para que te contacte pronto.
@@ -1076,7 +1078,8 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
     ][-3:]
     consulta = " ".join(anteriores + [mensaje_usuario])
 
-    if clave_conversacion not in conversaciones:
+    es_primer_mensaje = clave_conversacion not in conversaciones
+    if es_primer_mensaje:
         conversaciones[clave_conversacion] = [crear_system_message(phone_number_id, consulta)]
     else:
         conversaciones[clave_conversacion][0] = crear_system_message(phone_number_id, consulta)
@@ -1097,6 +1100,12 @@ def procesar_mensaje(identificador, mensaje_usuario, es_admin, phone_number_id):
         respuesta_texto = respuesta.choices[0].message.content
 
         respuesta_texto = procesar_respuesta(respuesta_texto, identificador, phone_number_id)
+
+        # ── En el primer mensaje, recordarle que puede pedir un asesor ──
+        # (si ya pidió uno en ese mismo mensaje, el chat quedó pausado y sobra)
+        if es_primer_mensaje and respuesta_texto and not esta_pausado(phone_number_id, identificador):
+            aviso = obtener_config_negocio(phone_number_id).get("aviso_humano", AVISO_HUMANO_DEFAULT)
+            respuesta_texto = f"{respuesta_texto}\n\n{aviso}"
 
         conversaciones[clave_conversacion].append({"role": "assistant", "content": respuesta_texto})
         logger.info(f"Respuesta generada para {identificador[:8]}... (negocio {phone_number_id})")

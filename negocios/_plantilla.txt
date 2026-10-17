@@ -1,0 +1,57 @@
+NOMBRE DEL NEGOCIO: [COMPLETAR — ej. Tienda La Esquina]
+
+DESCRIPCIÓN:
+[COMPLETAR — 2 a 4 líneas: qué vende, para quién, qué lo hace especial y marcas que maneja.]
+
+SALUDO INICIAL SUGERIDO:
+"¡Hola! 👋 Bienvenido a [NOMBRE]. Soy tu asistente virtual. Cuéntame qué estás buscando
+y te ayudo con precios, disponibilidad y pedidos."
+(No pongas aquí lo de hablar con un asesor: el bot lo agrega solo en el primer mensaje.)
+
+HORARIO DE ATENCIÓN:
+Lunes a viernes: [COMPLETAR]
+Sábados: [COMPLETAR]
+Domingos y festivos: [COMPLETAR o "cerrado"]
+
+UBICACIÓN DEL LOCAL:
+[COMPLETAR — dirección completa y ciudad. Si no tiene local: "Solo ventas en línea".]
+
+OPCIONES DE ENTREGA:
+1. Recoger en el local: [sin costo / no aplica]
+2. Domicilio: [ciudad o zona de cobertura], costo [$X COP], tiempo estimado [X].
+3. Envíos a otras ciudades: [sí, por qué transportadora y quién paga / no por ahora]
+
+DATOS DE PAGO:
+- [Nequi / Daviplata / Bancolombia...]: [número], a nombre de [titular]
+- Pago contra entrega: [sí / no / solo en ciertos casos]
+
+POLÍTICA DE CAMBIOS Y DEVOLUCIONES:
+[COMPLETAR — si no hay una política definida, escribe: "Un asesor del local confirma las
+condiciones de cambios y devoluciones".]
+
+PREGUNTAS FRECUENTES:
+- ¿[pregunta que los clientes hacen mucho]? [respuesta]
+- ¿[pregunta]? [respuesta]
+- ¿[pregunta]? [respuesta]
+
+CONTACTO PARA ATENCIÓN HUMANA:
+Si el cliente necesita hablar con una persona del equipo, un asesor se comunicará
+por este mismo chat en horario de atención.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECCIONES OPCIONALES (bórralas si no aplican)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+QUÉ VENDEMOS (CATEGORÍAS Y MARCAS):
+Los productos exactos, tallas, precios y unidades salen SIEMPRE del inventario, nunca de
+esta lista. Esto es solo para que el bot entienda qué tipo de cosas maneja la tienda.
+1. [CATEGORÍA] — Marcas: [...]. [Para qué sirve / a quién va dirigido.]
+2. [CATEGORÍA] — ...
+
+CÓMO RECOMENDAR:
+- [Qué preguntarle al cliente antes de recomendar: talla, para quién, color, uso...]
+- [Cuántas opciones mostrar, qué ofrecer después (fotos, combos...).]
+
+INSTRUCCIONES ESPECIALES DE ESTE NEGOCIO:
+- [Reglas que solo aplican a este negocio. Ej: temas de salud, edad mínima para
+  ciertos productos, productos que solo se venden por encargo, etc.]
