@@ -1590,10 +1590,11 @@ def enviar_prueba_instagram():
 def conectar_instagram():
     auth_url = (
         "https://www.instagram.com/oauth/authorize"
-        "?client_id=" + IG_LOGIN_APP_ID +
-        "&redirect_uri=" + IG_REDIRECT_URI +
-        "&scope=instagram_business_basic,instagram_business_manage_messages"
+        "?force_reauth=true"
+        "&client_id=2587624998377727"
+        "&redirect_uri=https://chatbot-prueba-0t6r.onrender.com/instagram/callback"
         "&response_type=code"
+        "&scope=instagram_business_basic%2Cinstagram_business_manage_messages"
     )
     html = (
         "<div style='font-family: sans-serif; max-width: 400px; margin: 60px auto; text-align: center;'>"
@@ -1618,7 +1619,7 @@ def instagram_callback():
             "client_id": IG_LOGIN_APP_ID,
             "client_secret": IG_LOGIN_APP_SECRET,
             "grant_type": "authorization_code",
-            "redirect_uri": IG_REDIRECT_URI,
+            "redirect_uri": "https://chatbot-prueba-0t6r.onrender.com/instagram/callback",
             "code": code,
         },
     )
