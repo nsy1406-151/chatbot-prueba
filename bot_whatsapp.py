@@ -1540,52 +1540,6 @@ def enviar_mensaje_instagram(destinatario_id, texto):
 
 
 
-@app.route("/enviar-prueba-instagram", methods=["GET", "POST"])
-def enviar_prueba_instagram():
-    resultado_html = ""
-
-    if request.method == "POST":
-        destinatario = request.form.get("destinatario", "").strip()
-        mensaje = request.form.get("mensaje", "").strip()
-
-        if destinatario and mensaje:
-            enviar_mensaje_instagram(destinatario, mensaje)
-            resultado_html = (
-                "<div style='background:#d4edda; color:#155724; padding:12px; "
-                "border-radius:8px; margin-top:15px;'>"
-                "✅ Mensaje enviado a " + destinatario + ": \"" + mensaje + "\""
-                "</div>"
-            )
-        else:
-            resultado_html = (
-                "<div style='background:#f8d7da; color:#721c24; padding:12px; "
-                "border-radius:8px; margin-top:15px;'>"
-                "⚠️ Debes completar el destinatario y el mensaje."
-                "</div>"
-            )
-
-    html = (
-        "<div style='font-family: sans-serif; max-width: 480px; margin: 60px auto;'>"
-        "<h2 style='color: #262626;'>Enviar mensaje desde ChatBots</h2>"
-        "<p style='color:#555;'>Cuenta de Instagram conectada: <b>@chatbots.co</b> "
-        "(ID: " + INSTAGRAM_ACCOUNT_ID + ")</p>"
-        "<form method='POST' style='margin-top:20px;'>"
-        "<label style='display:block; margin-bottom:6px; font-weight:bold;'>Destinatario (PSID/IGSID)</label>"
-        "<input type='text' name='destinatario' placeholder='ID del destinatario' "
-        "style='width:100%; padding:10px; margin-bottom:15px; border:1px solid #ccc; border-radius:6px;'>"
-        "<label style='display:block; margin-bottom:6px; font-weight:bold;'>Mensaje</label>"
-        "<textarea name='mensaje' rows='3' placeholder='Escribe el mensaje...' "
-        "style='width:100%; padding:10px; margin-bottom:15px; border:1px solid #ccc; border-radius:6px;'></textarea>"
-        "<button type='submit' style='background:#E1306C; color:white; border:none; "
-        "padding:12px 24px; border-radius:8px; font-weight:bold; cursor:pointer;'>Enviar mensaje</button>"
-        "</form>"
-        + resultado_html +
-        "</div>"
-    )
-    return html
-
-
-
 @app.route("/conectar-instagram")
 def conectar_instagram():
     auth_url = (
