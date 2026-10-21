@@ -50,7 +50,7 @@ MAX_MENSAJES = 20
 # La clave es el "phone_number_id" de Meta — el ID interno del número de
 # WhatsApp AL QUE le escribió el cliente (no el número del cliente).
 NEGOCIOS_CONFIG = {
-    "1290940880772557.": {  #SoloMedias para probar imagenes.
+    "1290940880772557": {  #SoloMedias para probar imagenes.
         "archivo": "negocios/solo_medias.txt",
         "sheet_id": os.getenv("SHEET_ID_SOLOMEDIAS"),
     },
@@ -62,7 +62,7 @@ NEGOCIOS_CONFIG = {
         # al admin salen desde este número de WhatsApp del negocio:
         "notificar_desde": "1290940880772557",
     },
-    "1290940880772557": {  # Whatsapp Izanprali
+    "1290940880772557.": {  # Whatsapp Izanprali
         "archivo": "negocios/urbana_style.txt",
         "sheet_id": os.getenv("SHEET_ID_IZANPRALI"),
         "canal": "whatsapp",
